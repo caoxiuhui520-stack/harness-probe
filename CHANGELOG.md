@@ -112,5 +112,5 @@ task, run a harness matrix, get a sensitivity report with confidence intervals.
 - Token accounting counts what the provider reports. Providers that omit usage
   on streaming responses will under-report.
 
-[Unreleased]: https://github.com/caoxiuhui520-stack/harness-probe/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/caoxiuhui520-stack/harness-probe/compare/v0.2.0...HEAD
 [0.1.0]: https://github.com/caoxiuhui520-stack/harness-probe/releases/tag/v0.1.0
