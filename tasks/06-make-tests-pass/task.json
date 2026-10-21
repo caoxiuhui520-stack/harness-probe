@@ -1,0 +1,9 @@
+{
+  "id": "06-make-tests-pass",
+  "title": "Multi-file bug: settings types and retry accounting",
+  "prompt": "This small project under app/ has failing tests. Two separate defects are involved: environment-variable overrides in config.py come back as the wrong type, and the sync job's retry accounting is wrong across multiple paths. Find both, fix them, and make the suite in tests/ pass. Do not modify the tests and do not change public signatures.",
+  "max_steps": 20,
+  "grader": {"type": "pytest", "target": "tests", "timeout": 120},
+  "tags": ["debugging", "multi-file", "python"],
+  "difficulty": "hard"
+}

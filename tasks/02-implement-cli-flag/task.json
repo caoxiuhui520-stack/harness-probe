@@ -1,0 +1,9 @@
+{
+  "id": "02-implement-cli-flag",
+  "title": "Add a CLI to an existing library module",
+  "prompt": "wordfreq.py is a library with no command-line interface. Add one so it can be run as `python wordfreq.py FILE [--top N] [--json]`. Requirements: print the top N words (default 10) to stdout, one per line, formatted as `<word> <count>`; with --json print a single JSON object mapping word to count for the whole file instead; on a missing file print an error containing the words 'no such file' and exit non-zero. The existing library functions must keep working unchanged. The tests in tests/ define the exact contract - run them.",
+  "max_steps": 18,
+  "grader": {"type": "pytest", "target": "tests", "timeout": 120},
+  "tags": ["feature", "python", "cli"],
+  "difficulty": "medium"
+}

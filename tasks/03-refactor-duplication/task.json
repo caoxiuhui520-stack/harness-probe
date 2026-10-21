@@ -1,0 +1,9 @@
+{
+  "id": "03-refactor-duplication",
+  "title": "Remove triplicated report formatting",
+  "prompt": "reports.py has three report formatters that are identical except for the title string. Refactor them so there is a single shared helper named `format_report(rows, title)` that does the formatting, and have all three public functions delegate to it. The rendered output of all three functions must stay byte-identical. Keep the three public function names and signatures unchanged. Run the tests to verify.",
+  "max_steps": 15,
+  "grader": {"type": "pytest", "target": "tests", "timeout": 120},
+  "tags": ["refactor", "python"],
+  "difficulty": "medium"
+}

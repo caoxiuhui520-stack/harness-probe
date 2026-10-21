@@ -1,0 +1,29 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# HarnessProbe run artifacts
+.harnessprobe/
+.verify/
+# Raw per-trial traces are large; the bundled results/ keeps the report and
+# manifest, which are what a reader needs to reproduce.
+results/*/traces.jsonl
+
+# Environments
+.venv/
+venv/
+env/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Build
+build/
+dist/
+*.egg-info/

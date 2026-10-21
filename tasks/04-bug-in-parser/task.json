@@ -1,0 +1,9 @@
+{
+  "id": "04-bug-in-parser",
+  "title": ".env parser corrupts values containing '#'",
+  "prompt": "Users report that environment values containing a '#' character come back truncated, even when the value is quoted. The parser is in envparse.py. Run the tests in tests/ to reproduce, find the root cause, and fix it. Quoting rules must be respected: a '#' inside quotes is data, a '#' outside quotes starts a comment. Do not modify the tests.",
+  "max_steps": 15,
+  "grader": {"type": "pytest", "target": "tests", "timeout": 120},
+  "tags": ["debugging", "parsing", "python"],
+  "difficulty": "hard"
+}

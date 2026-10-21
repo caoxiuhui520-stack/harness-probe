@@ -1,0 +1,48 @@
+name: Bug report
+description: Something in HarnessProbe behaves incorrectly.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A wrong number in a report is a bug. If a result looks surprising,
+        include the run directory so the trace can be inspected.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you expect, and what did you get instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: The exact command line, plus the task id and harness name.
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `harnessprobe --version`.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider
+      options:
+        - mock
+        - anthropic
+        - openai
+        - deepseek
+        - other OpenAI-compatible
+        - not provider related
+    validations:
+      required: true

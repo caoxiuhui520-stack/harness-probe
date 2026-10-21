@@ -1,0 +1,9 @@
+{
+  "id": "05-add-input-validation",
+  "title": "Implement signup validation against a test contract",
+  "prompt": "signup.py currently accepts anything and raises KeyError on missing fields. Implement real validation in validate_signup so the tests in tests/ pass. The tests are the specification: normalisation rules (trim/lowercase username, lowercase email, coerce age to int) and every rejection rule, with all field errors collected into a single ValidationError rather than failing on the first one. Do not modify the tests.",
+  "max_steps": 20,
+  "grader": {"type": "pytest", "target": "tests", "timeout": 120},
+  "tags": ["feature", "validation", "python"],
+  "difficulty": "medium"
+}

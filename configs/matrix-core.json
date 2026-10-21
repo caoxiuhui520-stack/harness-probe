@@ -1,0 +1,67 @@
+{
+  "_comment": "Core harness matrix. Each entry changes exactly one knob from the baseline so a delta is attributable to that knob alone.",
+  "baseline": {
+    "name": "baseline",
+    "system_prompt": null,
+    "tool_set": ["read_file", "write_file", "list_dir", "search", "run_command", "submit"],
+    "tool_description_style": "full",
+    "max_steps": 20,
+    "temperature": 0.0,
+    "history_policy": "full",
+    "retry_on_error": true,
+    "reasoning_hint": true,
+    "notes": "Everything the harness does for the model, nothing more."
+  },
+  "harnesses": [
+    {
+      "name": "no-reasoning-hint",
+      "reasoning_hint": false,
+      "notes": "Same tools, but no instruction to state intent before acting."
+    },
+    {
+      "name": "terse-tools",
+      "tool_description_style": "terse",
+      "notes": "One-line tool descriptions instead of full usage guidance."
+    },
+    {
+      "name": "minimal-tools",
+      "tool_description_style": "minimal",
+      "notes": "Tool names only. Tests whether description quality alone moves scores."
+    },
+    {
+      "name": "no-search",
+      "tool_set": ["read_file", "write_file", "list_dir", "run_command", "submit"],
+      "notes": "Grep removed; the model must read files to locate code."
+    },
+    {
+      "name": "no-shell",
+      "tool_set": ["read_file", "write_file", "list_dir", "search", "submit"],
+      "notes": "Cannot run the tests. Tests whether verification loops matter."
+    },
+    {
+      "name": "tight-budget",
+      "max_steps": 8,
+      "notes": "Half the step budget. Measures overhead, not capability."
+    },
+    {
+      "name": "loose-budget",
+      "max_steps": 40,
+      "notes": "Double the step budget. Does more room help or just cost more?"
+    },
+    {
+      "name": "drop-old-output",
+      "history_policy": "drop_old_tool_results",
+      "notes": "Old tool results elided. Common in production context management."
+    },
+    {
+      "name": "no-retry-nudge",
+      "retry_on_error": false,
+      "notes": "A text-only turn ends the session instead of being nudged."
+    },
+    {
+      "name": "verbose-system",
+      "system_prompt": "You are an expert software engineer. Think carefully about the problem before acting. Read the relevant files, understand the existing conventions, make a minimal and correct change, then verify it by running the tests. Never guess at a file's contents. When you are confident the task is complete and verified, call submit with a short summary.",
+      "notes": "A longer, more opinionated system prompt - what a tuned product harness looks like."
+    }
+  ]
+}

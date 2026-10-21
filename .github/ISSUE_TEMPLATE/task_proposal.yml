@@ -1,0 +1,56 @@
+name: Task proposal
+description: Propose a new evaluation task for the bundled set.
+labels: ["task"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Tasks are the measurement instrument. A task that any model always
+        passes, or that none can pass, carries no signal. Please say why this
+        one discriminates.
+
+  - type: input
+    id: task-id
+    attributes:
+      label: Proposed task id
+      description: kebab-case, e.g. `07-race-in-cache`
+    validations:
+      required: true
+
+  - type: dropdown
+    id: difficulty
+    attributes:
+      label: Expected difficulty
+      options: [easy, medium, hard]
+    validations:
+      required: true
+
+  - type: textarea
+    id: prompt
+    attributes:
+      label: Task prompt
+      description: Exactly what the agent will be told.
+    validations:
+      required: true
+
+  - type: textarea
+    id: discriminates
+    attributes:
+      label: Why this task discriminates
+      description: >
+        What failure mode does it expose, and why would a better harness or a
+        better model be measurably more likely to pass it?
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: The starting workspace fails the tests
+          required: true
+        - label: A reference solution passes the tests
+          required: true
+        - label: The grader checks the filesystem, not the transcript
+          required: true

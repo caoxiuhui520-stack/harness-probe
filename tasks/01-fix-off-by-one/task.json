@@ -1,0 +1,9 @@
+{
+  "id": "01-fix-off-by-one",
+  "title": "Pagination skips the first page",
+  "prompt": "The pagination helper in paginate.py is broken: the web UI never shows the first page of results. Run the tests in tests/ to see the failure, find the cause, and fix it. Do not change the public function signatures and do not modify the tests.",
+  "max_steps": 12,
+  "grader": {"type": "pytest", "target": "tests", "timeout": 120},
+  "tags": ["debugging", "python"],
+  "difficulty": "easy"
+}
