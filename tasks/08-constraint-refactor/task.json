@@ -1,0 +1,9 @@
+{
+  "id": "08-constraint-refactor",
+  "title": "Deduplicate a type guard without changing behaviour",
+  "prompt": "Every validator in validators.py opens with the same `isinstance(value, str)` guard. Extract that check into a single shared helper named `_is_str(value)` and have all four validators use it. The observable behaviour of every validator must stay exactly the same — the tests pin the behaviour and check that the duplication is gone. Do not rename the public functions and do not modify the tests.",
+  "max_steps": 16,
+  "grader": {"type": "pytest", "target": "tests", "timeout": 120},
+  "tags": ["refactor", "python"],
+  "difficulty": "medium"
+}

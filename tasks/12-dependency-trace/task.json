@@ -1,0 +1,9 @@
+{
+  "id": "12-dependency-trace",
+  "title": "A change at the bottom of a four-module chain",
+  "prompt": "`app.util.checksum` currently sums the raw bytes, which is order-independent but collides badly. Replace it with a digest that is still order-independent and stable, but that distinguishes any two different strings. The change must propagate correctly through util -> store -> report -> cli; the CLI must keep working and every test must pass. Do not modify the tests, and keep the checksum signature unchanged.",
+  "max_steps": 22,
+  "grader": {"type": "pytest", "target": "tests", "timeout": 120},
+  "tags": ["feature", "multi-file", "python"],
+  "difficulty": "medium"
+}

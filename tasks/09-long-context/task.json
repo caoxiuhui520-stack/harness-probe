@@ -1,0 +1,9 @@
+{
+  "id": "09-long-context",
+  "title": "Implement a release-note policy from a written specification",
+  "prompt": "changelog.py assembles release notes, but `is_user_visible` ignores the policy. The full specification is in docs/policy.md — five numbered rules plus ordering and fragment behaviour. Read it, then implement `is_user_visible` so the rules hold, and make `collect_entries` raise on a missing fragment rather than skipping it. The tests in tests/ encode every rule; run them.",
+  "max_steps": 20,
+  "grader": {"type": "pytest", "target": "tests", "timeout": 120},
+  "tags": ["feature", "spec-following", "python"],
+  "difficulty": "medium"
+}

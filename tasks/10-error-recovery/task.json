@@ -1,0 +1,9 @@
+{
+  "id": "10-error-recovery",
+  "title": "Retry loop retries a permanent failure",
+  "prompt": "fetcher.py retries every failure, including permanent ones. The docstring says a PermanentError should be raised immediately rather than retried, and the tests check both the attempt count and the wall-clock cost. Run the tests to reproduce, find why the permanent case is not short-circuiting, and fix it. Transient retry behaviour with backoff must keep working. Do not modify the tests.",
+  "max_steps": 16,
+  "grader": {"type": "pytest", "target": "tests", "timeout": 120},
+  "tags": ["debugging", "errors", "python"],
+  "difficulty": "medium"
+}

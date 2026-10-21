@@ -161,6 +161,335 @@ def verify_all(root: Path, *, check_failure: bool = True) -> int:
 # reference solution stops working fails loudly instead of quietly measuring
 # nothing.
 _REFERENCE_SOLUTIONS: dict[str, dict[str, str]] = {
+    "07-multi-file-bug": {
+        "cache.py": '''"""In-memory cache with a TTL.
+
+The eviction policy is documented in docs/design.md — read it, it is the
+specification for how expiry is supposed to work.
+"""
+
+import time
+
+
+class Cache:
+    def __init__(self, default_ttl=60.0):
+        self.default_ttl = default_ttl
+        self._store = {}
+
+    def set(self, key, value, ttl=None):
+        self._store[key] = (value, time.time() + (ttl or self.default_ttl))
+
+    def get(self, key):
+        entry = self._store.get(key)
+        if entry is None:
+            return None
+        value, expires_at = entry
+        if time.time() > expires_at:
+            del self._store[key]
+            return None
+        return value
+
+    def _live(self):
+        """Drop expired entries, then return the store."""
+        now = time.time()
+        for key in [k for k, (_, exp) in self._store.items() if now > exp]:
+            del self._store[key]
+        return self._store
+
+    def size(self):
+        return len(self._live())
+
+    def keys(self):
+        return list(self._live())
+''',
+        "session.py": '''"""A session that caches fetched records."""
+
+import time
+
+from cache import Cache
+
+
+class Session:
+    def __init__(self, fetcher, ttl=60.0):
+        self.cache = Cache(default_ttl=ttl)
+        self._fetcher = fetcher
+
+    def fetch(self, key):
+        """Return the cached value, or fetch and cache it."""
+        value = self.cache.get(key)
+        if value is not None:
+            return value
+        value = self._fetcher(key)
+        self.cache.set(key, value)
+        return value
+
+    def reload(self):
+        """Re-read every live key. Expired keys are dropped, not refreshed."""
+        refreshed = {}
+        for key in self.cache.keys():  # keys() sweeps, so this is live-only
+            value = self.cache.get(key)
+            if value is None:
+                continue
+            refreshed[key] = self._fetcher(key)
+            self.cache.set(key, refreshed[key])
+        return refreshed
+
+    def cached_count(self):
+        return self.cache.size()
+''',
+    },
+    "08-constraint-refactor": {
+        "validators.py": '''"""Input validation for the signup flow."""
+
+
+def _is_str(value):
+    """Shared type guard: every validator opens with this check."""
+    return isinstance(value, str)
+
+
+def validate_email(value):
+    if not _is_str(value):
+        return False
+    if "@" not in value:
+        return False
+    local, _, domain = value.partition("@")
+    if not local or not domain:
+        return False
+    if "." not in domain:
+        return False
+    return True
+
+
+def validate_username(value):
+    if not _is_str(value):
+        return False
+    if len(value) < 3 or len(value) > 20:
+        return False
+    for ch in value:
+        if not (ch.isalnum() or ch == "_"):
+            return False
+    return True
+
+
+def validate_password(value):
+    if not _is_str(value):
+        return False
+    if len(value) < 8:
+        return False
+    return True
+
+
+def validate_age(value):
+    if not isinstance(value, int):
+        return False
+    return 13 <= value <= 130
+''',
+    },
+    "09-long-context": {
+        "changelog.py": '''"""Release-note assembly.
+
+A release is built from merged change entries. The rules for what counts as
+"user-visible" are in docs/policy.md, and they are the part people get wrong.
+"""
+
+import re
+
+_ENTRY = re.compile(r"^- (?P<kind>\\w+): (?P<text>.+)$", re.MULTILINE)
+
+
+def parse_entries(text):
+    """Return the change entries in a changelog fragment, in file order."""
+    return [
+        {"kind": m.group("kind"), "text": m.group("text")}
+        for m in _ENTRY.finditer(text)
+    ]
+
+
+def collect_entries(paths):
+    """Read every fragment and concatenate its entries in path order."""
+    entries = []
+    for path in paths:
+        with open(path, encoding="utf-8") as fh:
+            entries.extend(parse_entries(fh.read()))
+    return entries
+
+
+def is_user_visible(entry):
+    """Decide whether an entry belongs in the release note.
+
+    Rules, per docs/policy.md (evaluated in this order):
+      4. text prefixed `chore:`  -> never visible, overrides everything
+      3. kind is Internal        -> never visible
+      2. text prefixed `internal:` -> never visible, overrides rule 1
+      1. kind is Added or Fixed  -> visible
+      5. otherwise               -> visible
+    """
+    kind = entry["kind"]
+    text = entry.get("text", "")
+
+    if text.startswith("chore:"):  # rule 4
+        return False
+    if kind == "Internal":  # rule 3
+        return False
+    if text.startswith("internal:"):  # rule 2
+        return False
+    if kind in ("Added", "Fixed"):  # rule 1
+        return True
+    return True  # rule 5
+
+
+def render_release(entries, version):
+    """Render a release note: only user-visible entries, grouped by kind."""
+    lines = [f"## {version}", ""]
+    for kind in ("Added", "Changed", "Fixed"):
+        visible = [e for e in entries if e["kind"] == kind and is_user_visible(e)]
+        if visible:
+            lines.append(f"### {kind}")
+            lines.append("")
+            lines.extend(f"- {e['text']}" for e in visible)
+            lines.append("")
+    return "\\n".join(lines).rstrip() + "\\n"
+''',
+    },
+    "10-error-recovery": {
+        "fetcher.py": '''"""A small HTTP-ish client with retry, for the sync job."""
+
+import time
+
+
+class FetchError(Exception):
+    """Raised when a fetch ultimately fails."""
+
+
+class TransientError(FetchError):
+    """Worth retrying."""
+
+
+class PermanentError(FetchError):
+    """Retrying will not help."""
+
+
+class Fetcher:
+    def __init__(self, transport, max_attempts=3, base_delay=0.01):
+        self.transport = transport
+        self.max_attempts = max_attempts
+        self.base_delay = base_delay
+        self.attempts = 0
+
+    def fetch(self, url):
+        """Fetch a URL, retrying transient failures with backoff.
+
+        Raises PermanentError immediately — retrying a permanent failure wastes
+        time and can make the outage worse.
+        """
+        last = None
+        for attempt in range(self.max_attempts):
+            self.attempts += 1
+            try:
+                return self.transport(url, attempt)
+            except PermanentError:
+                raise
+            except TransientError as exc:
+                last = exc
+                # Only sleep when another attempt will actually follow: a
+                # sleep before giving up is pure waste.
+                if attempt < self.max_attempts - 1:
+                    time.sleep(self.base_delay * (2**attempt))
+        raise TransientError(
+            f"gave up on {url} after {self.max_attempts} attempts: {last}"
+        )
+''',
+    },
+    "11-underspecified": {
+        "retry_policy.py": '''"""Retry policy for outbound requests.
+
+Deliberately under-specified. The requirements live in the tests, and where
+the tests are silent, choose the behaviour a reasonable engineer would expect
+and say so in a docstring.
+"""
+
+MAX_ATTEMPTS = 5
+
+_RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
+
+
+def should_retry(attempt, status_code, error=None):
+    """Decide whether to retry a request.
+
+    ``attempt`` is 1-based: 1 is the first try.
+
+    Retryable: 429 and 5xx, or any transport-level error (status_code None).
+    Not retryable: 2xx, 4xx other than 429, or once MAX_ATTEMPTS is reached.
+    """
+    if attempt >= MAX_ATTEMPTS:
+        return False
+    if status_code is None:
+        # No response: the request never completed, so it is worth another try.
+        return error is None or True
+    return status_code in _RETRYABLE_STATUS
+
+
+def backoff_delay(attempt, base=0.5, cap=30.0):
+    """Exponential backoff with full jitter, capped.
+
+    delay = min(cap, base * 2 ** (attempt - 1))
+
+    Chosen over fixed or linear backoff because it is the standard choice for
+    transient server errors, and over pure exponential because an uncapped
+    curve stalls a sync job. Deterministic (no random jitter) so a test can
+    assert on it.
+    """
+    exponent = max(0, attempt - 1)
+    return min(cap, base * (2**exponent))
+''',
+    },
+    "12-dependency-trace": {
+        "app/cli.py": '''"""Command-line entry point."""
+
+from app.report import build_report
+from app.store import Store
+
+
+def main(argv=None):
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("command", choices=["report", "list"])
+    args = parser.parse_args(argv)
+
+    store = Store()
+    if args.command == "list":
+        for name in store.names():
+            print(name)
+        return 0
+
+    report = build_report(store)
+    print(report.summary())
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+''',
+        "app/util.py": '''"""Shared helpers."""
+
+import hashlib
+
+
+def checksum(data):
+    """A stable, order-independent digest of the data.
+
+    Order-independent: the same multiset of characters yields the same digest
+    regardless of arrangement, which is what the store relies on to dedupe.
+    Implemented as the XOR of per-character hashes, so rearranging cannot
+    change the result while a different multiset does.
+    """
+    folded = 0
+    for ch in data:
+        folded ^= int(hashlib.sha256(ch.encode("utf-8")).hexdigest()[:8], 16)
+    return folded % 100000
+''',
+    },
     "01-fix-off-by-one": {
         "paginate.py": '''"""Page a list of records for the web UI."""
 

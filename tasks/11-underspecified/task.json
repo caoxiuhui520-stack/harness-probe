@@ -1,0 +1,9 @@
+{
+  "id": "11-underspecified",
+  "title": "Implement a retry policy from a partial specification",
+  "prompt": "retry_policy.py has two unimplemented functions. The tests in tests/ specify what is fixed: which HTTP statuses are retryable, that there are five attempts total, and that a network error is retryable. The tests deliberately do NOT fix the backoff curve — those assertions only require that it is non-negative, non-decreasing, capped, deterministic and monotonic in the base delay. Choose a sensible backoff, document the choice in the docstring, and make every test pass. Do not modify the tests.",
+  "max_steps": 18,
+  "grader": {"type": "pytest", "target": "tests", "timeout": 120},
+  "tags": ["feature", "under-specified", "python"],
+  "difficulty": "medium"
+}
