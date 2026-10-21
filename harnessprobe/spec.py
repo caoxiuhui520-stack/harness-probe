@@ -273,6 +273,10 @@ class RunManifest:
     harnesses: list[str]
     harnessprobe_version: str
     notes: str = ""
+    # Hash of the task set, harness knobs, baseline and trial count. A resumed
+    # run refuses to reuse trials unless this matches, so a changed experiment
+    # cannot silently absorb cached results from a different one.
+    fingerprint: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

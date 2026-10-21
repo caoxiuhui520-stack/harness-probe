@@ -131,11 +131,30 @@ Three design decisions carry most of the weight:
 "I fixed the bug" without fixing it must fail. Every grader executes in the
 trial's sandbox after the loop ends.
 
-**The agent cannot see or edit its own tests.** Test suites live with the task,
-outside the sandbox, and are copied in only at grading time.
+**The agent can read the tests, but cannot change the ones it is graded on.** A
+read-only copy is staged into the sandbox so the agent can actually run the
+suite — otherwise a prompt that says "run the tests" sends it hunting for a
+directory it cannot reach, and you measure the prompt's honesty instead of the
+model. Grading always reads the pristine copy from the task directory, so
+rewriting the staged one changes nothing that is measured.
+
+**Commands run with a rebuilt environment, not the host's.** `shell=True` hands
+the model a full shell, so the environment is the only thing between it and the
+host's API keys. The isolated sandbox forwards an allowlist of PATH, HOME and
+TMPDIR; nothing matching KEY, TOKEN, SECRET, PASSWORD, CREDENTIAL, AUTH or
+PROXY survives the filter. `Sandbox(isolated=False)` is available for trusted
+local tasks that need the real toolchain, and is not the default.
 
 **Each trial gets a fresh sandbox.** A harness that leaves broken state behind
 must not contaminate the next measurement.
+
+### What isolation is *not*
+
+This is environment and filesystem confinement, not a container. A model that
+runs a command can still read anything the sandbox user can read and can reach
+the network. Treat untrusted task sets as untrusted input: run them in a
+container, with no credentials in scope. See
+[docs/security.md](docs/security.md).
 
 ---
 

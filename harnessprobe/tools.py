@@ -190,11 +190,113 @@ class Sandbox:
 
     Path traversal is rejected rather than normalised: a harness that silently
     rewrites ``../`` hides a model failure that a real deployment would hit.
+
+    Two isolation modes:
+
+    ``isolated=True`` (default) — the command environment is rebuilt from
+    scratch rather than inherited. The host environment carries the API key, the
+    user's home directory and the proxy configuration, so passing it through
+    means an agent that runs ``env`` or ``curl`` can read credentials and reach
+    the network. Commands that must reach the host are an explicit, auditable
+    exception, not the default.
+
+    ``isolated=False`` — inherit the host environment. Only for trusted local
+    tasks where the agent needs the real toolchain; never for third-party tasks.
     """
 
-    def __init__(self, root: Path, readonly: list[str] | None = None) -> None:
+    # The minimum a shell needs. Everything else is dropped.
+    _SAFE_ENV_KEYS = (
+        "PATH",
+        "HOME",
+        "TMPDIR",
+        "LANG",
+        "LC_ALL",
+        "SYSTEMROOT",
+        "WINDIR",
+        "COMSPEC",
+        "TEMP",
+        "TMP",
+        "USERPROFILE",
+        "PATHEXT",
+        "PROCESSOR_ARCHITECTURE",
+        "NUMBER_OF_PROCESSORS",
+        "OS",
+    )
+    # Never forwarded even if the host sets them: these are the credentials and
+    # routing details that make an isolated sandbox worth having.
+    _BLOCKED_ENV_SUBSTRINGS = (
+        "KEY",
+        "TOKEN",
+        "SECRET",
+        "PASSWORD",
+        "CREDENTIAL",
+        "AUTH",
+        "PROXY",
+    )
+    # Keys this class sets itself, exempt from the blocklist.
+    _SELF_SET_KEYS = frozenset({"no_proxy", "NO_PROXY"})
+
+    def __init__(
+        self,
+        root: Path,
+        readonly: list[str] | None = None,
+        *,
+        isolated: bool = True,
+        extra_env: dict[str, str] | None = None,
+    ) -> None:
         self.root = Path(root).resolve()
         self.readonly = {Path(p).as_posix() for p in (readonly or [])}
+        self.isolated = isolated
+        self.extra_env = dict(extra_env or {})
+
+    def command_env(self) -> dict[str, str]:
+        """The environment a sandboxed command runs with.
+
+        Deliberately small. A model that runs ``env`` sees PATH and little else,
+        and cannot reach the provider from inside the sandbox.
+        """
+        env: dict[str, str] = {
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHONIOENCODING": "utf-8",
+        }
+        if self.isolated:
+            # Disable proxying rather than inheriting the host's. Applied before
+            # the host scan so `no_proxy` itself is never a candidate for
+            # blocking, and so a host proxy cannot route sandbox traffic.
+            env["no_proxy"] = "*"
+            env["NO_PROXY"] = "*"
+        if not self.isolated:
+            env.update(os.environ)
+        else:
+            # Host values only, and only the allowlisted ones. The blocklist is
+            # applied to the result so a name like `SSH_AUTH_SOCK` cannot slip
+            # in through an allowlisted prefix.
+            for key in self._SAFE_ENV_KEYS:
+                value = os.environ.get(key)
+                if value is not None:
+                    env[key] = value
+        # Explicit extras are the caller's responsibility and are applied last,
+        # then the credential filter runs over everything so a host value or an
+        # extra cannot smuggle a credential-shaped name back in.
+        env.update(self.extra_env)
+        for key in self.blocked_env_present(env):
+            del env[key]
+        return env
+
+    @classmethod
+    def blocked_env_present(cls, env: dict[str, str]) -> list[str]:
+        """Names in ``env`` that look like credentials.
+
+        Excludes the keys this class sets itself (`no_proxy` is a *blocking*
+        directive, not a credential). Used by tests and by the self-check in
+        command_env().
+        """
+        return sorted(
+            k
+            for k in env
+            if k not in cls._SELF_SET_KEYS
+            and any(bad in k.upper() for bad in cls._BLOCKED_ENV_SUBSTRINGS)
+        )
 
     def resolve(self, rel: str) -> Path:
         if os.path.isabs(rel) or re.match(r"^[A-Za-z]:[\\/]", rel):
@@ -288,8 +390,10 @@ class Sandbox:
 
     def run_command(self, command: str, timeout: int = 60) -> ToolResult:
         timeout = max(1, min(int(timeout or 60), 600))
-        env = dict(os.environ)
-        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        # `shell=True` gives the model a full shell, so the environment is the
+        # only thing standing between it and the host's credentials. See
+        # command_env().
+        env = self.command_env()
         try:
             proc = subprocess.run(
                 command,

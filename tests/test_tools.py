@@ -1,5 +1,7 @@
 """Tests for the sandbox. A path-traversal hole here would make every score a lie."""
 
+from pathlib import Path
+
 import pytest
 
 from harnessprobe.tools import Sandbox, ToolError, build_tool_specs
@@ -135,6 +137,57 @@ def test_run_command_runs_in_the_sandbox(sandbox, tmp_path):
     sandbox.write_file("marker.txt", "x")
     out = sandbox.run_command("cat marker.txt")
     assert "x" in out.content
+
+
+# -- isolation -------------------------------------------------------------
+#
+# `shell=True` hands the model a full shell, so the environment is the only
+# thing between it and the host's credentials. These tests are the actual
+# security boundary; without them the isolation is a comment.
+
+
+def test_isolated_env_excludes_host_credentials(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-should-not-leak")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-should-not-leak")
+    monkeypatch.setenv("SOME_SESSION_TOKEN", "should-not-leak")
+    box = Sandbox(Path("."), isolated=True)
+    env = box.command_env()
+    leaked = box.blocked_env_present(env)
+    assert leaked == [], f"credentials present in sandbox env: {leaked}"
+
+
+def test_isolated_command_cannot_read_credentials(sandbox, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-should-not-leak")
+    out = sandbox.run_command("env")
+    assert "sk-ant-should-not-leak" not in out.content
+    assert "ANTHROPIC_API_KEY" not in out.content
+
+
+def test_isolated_env_keeps_the_path_so_tools_work(sandbox):
+    env = sandbox.command_env()
+    assert "PATH" in env
+    out = sandbox.run_command("python --version")
+    assert not out.is_error or "python" in out.content.lower()
+
+
+def test_isolated_env_blocks_proxy_variables(monkeypatch):
+    monkeypatch.setenv("HTTP_PROXY", "http://10.0.0.1:8080")
+    monkeypatch.setenv("HTTPS_PROXY", "http://10.0.0.1:8080")
+    box = Sandbox(Path("."), isolated=True)
+    env = box.command_env()
+    assert not box.blocked_env_present(env)
+    assert env.get("no_proxy") == "*"
+
+
+def test_non_isolated_mode_inherits_host_env(monkeypatch):
+    monkeypatch.setenv("HP_TEST_MARKER", "present")
+    box = Sandbox(Path("."), isolated=False)
+    assert box.command_env().get("HP_TEST_MARKER") == "present"
+
+
+def test_extra_env_is_applied_last(sandbox):
+    box = Sandbox(sandbox.root, extra_env={"HP_EXTRA": "yes"})
+    assert box.command_env().get("HP_EXTRA") == "yes"
 
 
 # -- tool specs -----------------------------------------------------------

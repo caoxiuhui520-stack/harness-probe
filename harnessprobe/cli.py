@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 import threading
 import time
+from dataclasses import asdict
 from pathlib import Path
 
 from . import __version__
@@ -73,6 +75,40 @@ def load_harnesses(path: str) -> tuple[list[HarnessConfig], str]:
     return merged, baseline.name
 
 
+def experiment_fingerprint(
+    tasks: list[Task], harnesses: list[HarnessConfig], baseline: str, trials: int
+) -> str:
+    """Hash everything a resumed run must match to reuse its earlier trials.
+
+    Resuming reads trials recorded by a previous invocation and treats them as
+    results of *this* experiment. If the task set, a prompt, a harness knob or
+    the trial count changed in between, those cached trials describe a
+    different experiment — and a report assembled from both would look complete
+    while measuring something else. Comparing this fingerprint before reusing
+    anything turns that into a refusal instead.
+    """
+    blob = json.dumps(
+        {
+            "tasks": [
+                {
+                    "id": t.id,
+                    "prompt": t.prompt,
+                    "max_steps": t.max_steps,
+                    "grader": asdict(t.grader),
+                    "readonly": sorted(t.readonly),
+                }
+                for t in tasks
+            ],
+            "harnesses": [h.to_dict() for h in harnesses],
+            "baseline": baseline,
+            "trials": trials,
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+    ).encode()
+    return hashlib.sha256(blob).hexdigest()[:16]
+
+
 # --------------------------------------------------------------------------
 # Commands
 # --------------------------------------------------------------------------
@@ -93,6 +129,20 @@ def cmd_run(args: argparse.Namespace) -> int:
     run_dir = Path(args.out) / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
+    fingerprint = experiment_fingerprint(tasks, harnesses, baseline_name, args.trials)
+
+    # Capture the previous manifest's fingerprint BEFORE overwriting it, so a
+    # resume can tell whether the cached trials came from this same experiment.
+    prior_fingerprint = ""
+    prior_manifest_path = run_dir / "manifest.json"
+    if prior_manifest_path.exists():
+        try:
+            prior_fingerprint = json.loads(
+                prior_manifest_path.read_text(encoding="utf-8")
+            ).get("fingerprint", "")
+        except (json.JSONDecodeError, OSError):
+            prior_fingerprint = ""
+
     manifest = RunManifest(
         run_id=run_id,
         created_at=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
@@ -104,6 +154,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         harnesses=[h.name for h in harnesses],
         harnessprobe_version=__version__,
         notes=args.notes,
+        fingerprint=fingerprint,
     )
     (run_dir / "manifest.json").write_text(
         json.dumps(manifest.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
@@ -123,17 +174,32 @@ def cmd_run(args: argparse.Namespace) -> int:
     resumed: list[TrialResult] = []
     done_keys: set[tuple[str, str, int]] = set()
     if args.resume and trace_path.exists():
+        # Refuse to reuse trials from a different experiment. Without this, a
+        # changed matrix or task set would silently absorb the old results and
+        # the report would look complete while measuring something else.
+        if prior_fingerprint and prior_fingerprint != fingerprint:
+            print(
+                "error: this run was recorded with a different experiment "
+                f"(fingerprint {prior_fingerprint}, now {fingerprint}).\n"
+                "       Reusing its trials would mix results from two different "
+                "experiments.\n"
+                "       Start a new run with --run-id, or revert the matrix / "
+                "task changes.",
+                file=sys.stderr,
+            )
+            return 2
+
         for line in trace_path.read_text(encoding="utf-8").splitlines():
             if not line.strip():
                 continue
             try:
-                prior = TrialResult.from_dict(json.loads(line))
+                prior_trial = TrialResult.from_dict(json.loads(line))
             except (json.JSONDecodeError, TypeError):
                 continue
-            if prior.error:
+            if prior_trial.error:
                 continue
-            done_keys.add((prior.task_id, prior.harness, prior.trial))
-            resumed.append(prior)
+            done_keys.add((prior_trial.task_id, prior_trial.harness, prior_trial.trial))
+            resumed.append(prior_trial)
         counter["done"] = len(resumed)
         counter["passed"] = sum(int(r.passed) for r in resumed)
         if resumed:
@@ -183,6 +249,24 @@ def cmd_run(args: argparse.Namespace) -> int:
         baseline=baseline_name,
         harness_knobs={h.name: h.to_dict() for h in harnesses},
     )
+
+    # An incomplete matrix must not be able to pass as a complete one. Without
+    # this, a run cut short by a provider outage produces a report whose
+    # aggregate numbers look like a full experiment.
+    expected_cells = len(tasks) * len(harnesses)
+    present_cells = len({(r.task_id, r.harness) for r in results})
+    if present_cells < expected_cells:
+        report.warnings.insert(
+            0,
+            f"INCOMPLETE EXPERIMENT: {present_cells}/{expected_cells} "
+            "(task, harness) cells present. The aggregate numbers below do not "
+            "describe a full run — per-task coverage varies and comparisons "
+            "between harnesses are not apples-to-apples.",
+        )
+        report.complete = False
+    else:
+        report.complete = True
+
     (run_dir / "report.json").write_text(
         json.dumps(report.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
     )

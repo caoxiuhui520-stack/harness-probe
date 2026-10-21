@@ -6,18 +6,25 @@ you whether a model's score reflects capability or just a well-tuned prompt.
 
 Definitions used throughout:
 
-``pass@k``   — probability at least one of k trials passes. Capability ceiling.
-``pass^k``   — probability all k trials pass. Reliability floor.
-``delta``    — pass rate of a harness minus the baseline harness, same model.
-``HSI``      — Harness Sensitivity Index: mean absolute delta over all
-               non-baseline harnesses. High HSI means the model's measured
-               quality is mostly a property of the harness.
-``flakiness``— 1 - pass^k / pass@k within one harness. Same config, same task,
-               different answer.
+``pass@k``     — probability at least one of k trials passes. Capability ceiling.
+``pass^k``     — probability all k trials pass. Reliability floor.
+``delta``      — pass rate of a harness minus the baseline harness, same model.
+``HSI``        — Harness Sensitivity Index: mean absolute delta over all
+                 non-baseline harnesses. A measurement under this task set,
+                 harness matrix and budget — not a property of the model.
+``max degradation`` — the single largest drop. Reported alongside HSI because
+                 averaging over harnesses dilutes one large regression.
+``paired delta``— per-task delta against the baseline. The task is the
+                 independent unit; trials of one task are not independent
+                 samples.
+``flakiness``  — 1 - pass^k / pass@k within one harness. Same config, same task,
+                 different answer. Only meaningful for k > 1.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from collections import defaultdict
 from collections.abc import Iterable
@@ -134,7 +141,9 @@ class HarnessRow:
     mean_tokens: float
     token_delta_pct: float
     mean_steps: float
-    flakiness: float
+    # None when k <= 1: the quantity is not defined, and 0.00 would read as
+    # "measured stable" rather than "not measured".
+    flakiness: float | None
     per_task: dict[str, float] = field(default_factory=dict)
 
 
@@ -145,9 +154,25 @@ class Report:
     trials_per_cell: int
     rows: list[HarnessRow] = field(default_factory=list)
     hsi: float = 0.0
+    # Worst = largest measured drop vs baseline; best = largest measured gain.
+    # Both are descriptive, not causal: they name the configuration associated
+    # with the biggest movement, not the reason for it.
     hsi_worst: str = ""
     hsi_best: str = ""
+    # Largest single drop vs baseline, in percentage points. HSI averages over
+    # harnesses and dilutes one large regression into noise — ten harnesses at
+    # 0 pp plus one at -16 pp gives an HSI of 1.7%, which reads as "not
+    # sensitive". This field cannot hide that.
+    max_degradation: float = 0.0
+    # Per-task delta in percentage points, keyed by harness name. Pairing by
+    # task is what makes a delta interpretable.
+    paired: dict[str, dict[str, float]] = field(default_factory=dict)
+    # Task-level bootstrap CI for the mean paired delta, per harness.
+    paired_ci: dict[str, tuple[float, float]] = field(default_factory=dict)
     overall_pass_rate: float = 0.0
+    # False when the run did not cover every (task, harness) cell. Aggregate
+    # numbers from an incomplete matrix must not be read as a full experiment.
+    complete: bool = True
     task_count: int = 0
     warnings: list[str] = field(default_factory=list)
     knobs: dict[str, Any] = field(default_factory=dict)
@@ -158,10 +183,20 @@ class Report:
             "baseline": self.baseline,
             "trials_per_cell": self.trials_per_cell,
             "overall_pass_rate": self.overall_pass_rate,
+            "complete": self.complete,
             "task_count": self.task_count,
             "hsi": self.hsi,
             "hsi_worst": self.hsi_worst,
             "hsi_best": self.hsi_best,
+            "max_degradation": round(self.max_degradation, 4),
+            "paired": {
+                h: {t: round(v, 4) for t, v in sorted(d.items())}
+                for h, d in self.paired.items()
+            },
+            "paired_ci": {
+                h: [round(lo, 4), round(hi, 4)]
+                for h, (lo, hi) in self.paired_ci.items()
+            },
             "warnings": self.warnings,
             "knobs": self.knobs,
             "harnesses": [
@@ -174,12 +209,82 @@ class Report:
                     "mean_tokens": round(r.mean_tokens, 1),
                     "token_delta_pct": round(r.token_delta_pct, 2),
                     "mean_steps": round(r.mean_steps, 2),
-                    "flakiness": round(r.flakiness, 4),
+                    "flakiness": None if r.flakiness is None else round(r.flakiness, 4),
                     "per_task": {k: round(v, 4) for k, v in sorted(r.per_task.items())},
                 }
                 for r in self.rows
             ],
         }
+
+
+def paired_deltas(
+    results: list[TrialResult], baseline: str
+) -> dict[str, dict[str, float]]:
+    """Per-task pass-rate difference between each harness and the baseline.
+
+    Pairing by task is what makes a delta interpretable: a harness that loses
+    points on hard tasks and a harness that loses them uniformly are different
+    findings, and the aggregate hides which one you have.
+    """
+    cells = aggregate(results)
+    base = {
+        task: cells[(task, baseline)]
+        for (_task, h), cell in cells.items()
+        if h == baseline
+        for task in [_task]
+    }
+    out: dict[str, dict[str, float]] = {}
+    for (task, harness), cell in cells.items():
+        if harness == baseline or task not in base:
+            continue
+        out.setdefault(harness, {})[task] = cell.pass_rate - base[task].pass_rate
+    return out
+
+
+def task_level_bootstrap_ci(
+    deltas: dict[str, float], *, iterations: int = 2000, alpha: float = 0.05
+) -> tuple[float, float]:
+    """Bootstrap CI over tasks for the mean of a per-task delta vector.
+
+    The task is the independent unit, not the trial: three trials of the same
+    task are three measurements of one item, and treating them as independent
+    understates the interval by roughly the number of trials. Wilson is still
+    the right tool for a single pass *rate*; this is for a difference of rates.
+    """
+    values = list(deltas.values())
+    n = len(values)
+    if n == 0:
+        return (0.0, 0.0)
+    if n == 1:
+        return (values[0], values[0])
+    # Deterministic pseudo-sampling: seed from the data itself so the same
+    # deltas always produce the same interval (reports must be reproducible).
+    rng = _DeterministicRandom(values, n)
+    means: list[float] = []
+    for _ in range(iterations):
+        sample = [values[rng.next_index()] for _ in range(n)]
+        means.append(sum(sample) / n)
+    means.sort()
+    lo = means[int((alpha / 2) * iterations)]
+    hi = means[min(iterations - 1, int((1 - alpha / 2) * iterations))]
+    return (lo, hi)
+
+
+class _DeterministicRandom:
+    """A tiny LCG. Enough for bootstrap resampling, and reproducible."""
+
+    def __init__(self, seed_values: list[float], modulus: int) -> None:
+        # hash() is salted per process, so derive the seed from the values
+        # themselves — a report must be byte-identical when re-run.
+        digest = hashlib.sha256(
+            json.dumps(seed_values, sort_keys=True).encode("utf-8")
+        ).digest()
+        self.state = int.from_bytes(digest[:4], "big") or 1
+        self.modulus = max(1, modulus)
+
+    def next_index(self) -> int:
+        self.state = (1103515245 * self.state + 12345) & 0x7FFFFFFF
+        return self.state % self.modulus
 
 
 def analyze(
@@ -219,13 +324,17 @@ def analyze(
         low, high = wilson_interval(passes, n)
 
         # Flakiness: average over tasks of (1 - pass^k / pass@k).
+        # At k=1 this is identically zero, so it is reported as None rather than
+        # 0.00 — a zero implies "measured and stable", which k=1 cannot support.
         flake_terms = []
         for c in hcells:
             pak = pass_at_k(c.n, c.passes, k)
             ppk = pass_pow_k(c.n, c.passes, k)
             if pak > 0:
                 flake_terms.append(1.0 - ppk / pak)
-        flakiness = sum(flake_terms) / len(flake_terms) if flake_terms else 0.0
+        flakiness: float | None = None
+        if k > 1:
+            flakiness = sum(flake_terms) / len(flake_terms) if flake_terms else 0.0
 
         rows.append(
             HarnessRow(
@@ -247,8 +356,21 @@ def analyze(
 
     non_base = [r for r in rows if r.harness != baseline]
     hsi = sum(abs(r.delta) for r in non_base) / len(non_base) if non_base else 0.0
-    worst = max(non_base, key=lambda r: r.delta, default=None)
-    best = min(non_base, key=lambda r: r.delta, default=None)
+
+    # Naming: `delta` is signed, so the most *damaging* harness is the one with
+    # the LOWEST delta (largest drop), not the highest. Naming them by |delta|
+    # would report the biggest improver as the biggest regression whenever the
+    # baseline is not the best-performing configuration.
+    #
+    # With a single non-baseline harness it is both the max and the min, so the
+    # labels would say the same thing twice. Leave them empty in that case
+    # rather than asserting a direction the data does not support.
+    if len(non_base) >= 2:
+        worst = min(non_base, key=lambda r: r.delta)
+        best = max(non_base, key=lambda r: r.delta)
+    else:
+        worst = None
+        best = None
 
     warnings: list[str] = []
     if trials_per_cell < 3:
@@ -266,14 +388,31 @@ def analyze(
             f"only {task_count} task(s) — a single unlucky task dominates the mean"
         )
 
+    # Max degradation: the single largest drop. HSI averages over harnesses and
+    # dilutes one large regression into noise (10 harnesses at 0 pp plus one at
+    # -16 pp yields an HSI of 1.7%, which reads as "not sensitive").
+    max_degradation = min((r.delta for r in non_base), default=0.0)
+
+    # Paired, per-task deltas with a task-level bootstrap interval.
+    paired = paired_deltas(results, baseline)
+    paired_ci: dict[str, tuple[float, float]] = {}
+    for harness, deltas in paired.items():
+        if len(deltas) >= 2:
+            paired_ci[harness] = task_level_bootstrap_ci(deltas)
+        else:
+            paired_ci[harness] = (0.0, 0.0)
+
     return Report(
         model=model,
         baseline=baseline,
         trials_per_cell=trials_per_cell,
         rows=rows,
         hsi=hsi,
-        hsi_worst=worst.harness if worst else "",
-        hsi_best=best.harness if best else "",
+        hsi_worst=worst.harness if worst is not None else "",
+        hsi_best=best.harness if best is not None else "",
+        max_degradation=max_degradation,
+        paired=paired,
+        paired_ci=paired_ci,
         overall_pass_rate=sum(c.passes for c in cells.values())
         / max(1, sum(c.n for c in cells.values())),
         task_count=task_count,
@@ -296,22 +435,64 @@ def render_markdown(report: Report) -> str:
         f"- overall pass rate: {report.overall_pass_rate:.1%}",
         f"- **Harness Sensitivity Index: {report.hsi:.1%}**"
         + (
-            f"  (most sensitive to `{report.hsi_worst}`, most robust under `{report.hsi_best}`)"
+            f"  (largest drop under `{report.hsi_worst}`, "
+            f"largest gain under `{report.hsi_best}`)"
             if report.hsi_worst
             else ""
         ),
+        f"- **Max degradation: {report.max_degradation:+.1%}**"
+        + (
+            f" under `{report.hsi_worst}`"
+            if report.hsi_worst and report.max_degradation < 0
+            else ""
+        ),
         "",
-        "| harness | pass rate | delta vs baseline | 95% CI | tokens | token delta | steps | flakiness |",
-        "|---|---:|---:|---|---:|---:|---:|---:|",
+        (
+            "HSI is a mean over harnesses and hides a single large regression; "
+            "read it together with max degradation. Both are descriptive "
+            "measurements under this task set, harness matrix and budget — not "
+            "properties of the model."
+        ),
+        "",
+        "| harness | pass rate | delta vs baseline | 95% CI | paired delta (task-level bootstrap) | tokens | token delta | steps |",
+        "|---|---:|---:|---|---|---:|---:|---:|",
     ]
     for row in sorted(report.rows, key=lambda r: -r.pass_rate):
         # ASCII only: reports get printed to Windows consoles with a GBK codepage.
         mark = " (baseline)" if row.harness == report.baseline else ""
+        lo, hi = report.paired_ci.get(row.harness, (0.0, 0.0))
+        if report.paired.get(row.harness) and len(report.paired[row.harness]) >= 2:
+            ci_text = f"{row.delta:+.1%} [{lo:+.0%}, {hi:+.0%}]"
+        else:
+            ci_text = f"{row.delta:+.1%} (n/a: <2 tasks)"
         lines.append(
             f"| `{row.harness}`{mark} | {row.pass_rate:.1%} | {row.delta:+.1%} | "
-            f"[{row.ci_low:.0%}, {row.ci_high:.0%}] | {row.mean_tokens:.0f} | "
-            f"{row.token_delta_pct:+.1f}% | {row.mean_steps:.1f} | {row.flakiness:.2f} |"
+            f"[{row.ci_low:.0%}, {row.ci_high:.0%}] | {ci_text} | {row.mean_tokens:.0f} | "
+            f"{row.token_delta_pct:+.1f}% | {row.mean_steps:.1f} |"
         )
+    flaky = [r for r in report.rows if r.flakiness is not None]
+    if flaky:
+        lines += ["", "## Flakiness (k > 1)", ""]
+        lines += ["| harness | flakiness |", "|---|---:|"]
+        for row in sorted(flaky, key=lambda r: -(r.flakiness or 0.0)):
+            lines.append(f"| `{row.harness}` | {row.flakiness:.2f} |")
+        lines += [
+            "",
+            (
+                "Same config, same task, different outcome. High flakiness "
+                "means the measurement is noisy before any harness change is "
+                "considered."
+            ),
+        ]
+    elif report.trials_per_cell <= 1:
+        lines += [
+            "",
+            (
+                "Flakiness is not reported: it needs k > 1 trials per cell, and "
+                "this run has one. Run with `--trials 3` or more to measure it."
+            ),
+        ]
+
     if report.warnings:
         lines += ["", "## Caveats", ""]
         lines += [f"- {w}" for w in report.warnings]

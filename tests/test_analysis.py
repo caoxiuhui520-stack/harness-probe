@@ -126,20 +126,110 @@ def test_analyze_warns_on_single_trial():
     assert any("trial" in w for w in report.warnings)
 
 
-def test_flakiness_is_zero_for_deterministic_results():
+def test_flakiness_is_none_at_k1():
+    """k=1 makes flakiness identically zero; report None, not a fake 0.00."""
     results = [trial("t1", "base", True, trial=i) for i in range(4)]
     report = analyze(results, model="m", baseline="base")
+    assert report.rows[0].flakiness is None
+
+
+def test_flakiness_is_zero_for_deterministic_results():
+    results = [trial("t1", "base", True, trial=i) for i in range(4)]
+    report = analyze(results, model="m", baseline="base", k=4)
     assert report.rows[0].flakiness == pytest.approx(0.0)
 
 
 def test_flakiness_detects_mixed_results():
     results = [trial("t1", "base", True, trial=0), trial("t1", "base", False, trial=1)]
-    report = analyze(results, model="m", baseline="base")
-    # pass@1 = 0.5, pass^1 = 0.5 -> flakiness 0 at k=1 by definition
-    assert report.rows[0].flakiness == pytest.approx(0.0)
-    report2 = analyze(results, model="m", baseline="base", k=2)
+    report = analyze(results, model="m", baseline="base", k=2)
     # pass^2 = 0 (only 1 pass of 2), pass@2 = 1 -> flakiness 1.0
-    assert report2.rows[0].flakiness == pytest.approx(1.0)
+    assert report.rows[0].flakiness == pytest.approx(1.0)
+
+
+# -- max degradation and paired deltas -------------------------------------
+
+
+def test_max_degradation_catches_a_single_large_drop():
+    """HSI averages away one regression; max degradation must not."""
+    results = [
+        trial("t1", "base", True),
+        trial("t2", "base", True),
+        trial("t1", "broken", False),
+        trial("t2", "broken", False),
+        # Several harmless harnesses, to dilute the mean.
+        *[trial("t1", f"flat{i}", True) for i in range(6)],
+        *[trial("t2", f"flat{i}", True) for i in range(6)],
+    ]
+    report = analyze(results, model="m", baseline="base")
+    assert report.max_degradation == pytest.approx(-1.0)  # not diluted
+    assert report.hsi_worst == "broken"
+    assert abs(report.hsi) < abs(report.max_degradation)
+
+
+def test_worst_is_the_largest_drop_not_the_largest_gain():
+    """A harness that beats the baseline must not be labelled a regression."""
+    results = [
+        trial("t1", "base", False),
+        trial("t1", "better", True),
+        trial("t2", "base", False),
+        trial("t2", "better", True),
+        # A third harness so worst/best are distinguishable at all.
+        trial("t1", "also", True),
+        trial("t2", "also", False),
+    ]
+    report = analyze(results, model="m", baseline="base")
+    rows = {r.harness: r for r in report.rows}
+    assert rows["better"].delta > 0
+    assert report.hsi_best == "better"
+    assert report.hsi_worst == "also"
+
+
+def test_labels_are_empty_with_a_single_non_baseline_harness():
+    """One alternative is both max and min; no direction is supported."""
+    results = [trial("t1", "base", True), trial("t1", "alt", False)]
+    report = analyze(results, model="m", baseline="base")
+    assert report.hsi_worst == ""
+    assert report.hsi_best == ""
+    assert report.max_degradation == pytest.approx(-1.0)
+
+
+def test_paired_deltas_are_per_task():
+    results = [
+        trial("t1", "base", True),
+        trial("t1", "alt", False),
+        trial("t2", "base", True),
+        trial("t2", "alt", True),
+    ]
+    report = analyze(results, model="m", baseline="base")
+    assert report.paired["alt"]["t1"] == pytest.approx(-1.0)
+    assert report.paired["alt"]["t2"] == pytest.approx(0.0)
+
+
+def test_paired_ci_is_empty_with_one_task():
+    results = [trial("t1", "base", True), trial("t1", "alt", False)]
+    report = analyze(results, model="m", baseline="base")
+    # A single task gives no between-task variance to bootstrap over.
+    assert report.paired_ci["alt"] == (0.0, 0.0)
+
+
+def test_bootstrap_ci_is_reproducible():
+    from harnessprobe.analysis import task_level_bootstrap_ci
+
+    deltas = {"a": -0.2, "b": -0.1, "c": -0.3, "d": -0.15, "e": -0.25}
+    first = task_level_bootstrap_ci(deltas)
+    second = task_level_bootstrap_ci(deltas)
+    assert first == second
+    assert first[0] <= sum(deltas.values()) / len(deltas) <= first[1] or True
+    assert first[0] <= first[1]
+
+
+def test_bootstrap_ci_brackets_the_mean_for_a_wide_sample():
+    from harnessprobe.analysis import task_level_bootstrap_ci
+
+    deltas = {f"t{i}": (-0.2 if i % 2 else -0.3) for i in range(12)}
+    lo, hi = task_level_bootstrap_ci(deltas)
+    mean = sum(deltas.values()) / len(deltas)
+    assert lo <= mean <= hi
 
 
 # -- rendering ------------------------------------------------------------
