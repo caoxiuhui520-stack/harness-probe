@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -74,7 +74,7 @@ class Task:
         return hashlib.sha256(blob).hexdigest()[:16]
 
     @classmethod
-    def load(cls, task_dir: Path) -> "Task":
+    def load(cls, task_dir: Path) -> Task:
         task_dir = Path(task_dir).resolve()
         spec_path = task_dir / "task.json"
         if not spec_path.exists():
@@ -83,7 +83,7 @@ class Task:
         return cls.from_dict(raw, root=task_dir)
 
     @classmethod
-    def from_dict(cls, raw: dict[str, Any], root: Path | None = None) -> "Task":
+    def from_dict(cls, raw: dict[str, Any], root: Path | None = None) -> Task:
         if "id" not in raw:
             raise SpecError("task.json requires an 'id'")
         if "prompt" not in raw:
@@ -172,7 +172,7 @@ class HarnessConfig:
     # extra free-form metadata that ends up in the report
     notes: str = ""
 
-    def merged(self, base: "HarnessConfig") -> "HarnessConfig":
+    def merged(self, base: HarnessConfig) -> HarnessConfig:
         """Return a copy where unset knobs are taken from ``base``."""
         out = HarnessConfig(**asdict(self))
         for knob in HARNESS_KNOBS:
@@ -200,7 +200,7 @@ class HarnessConfig:
             raise SpecError("temperature must be within [0, 2]")
 
     @classmethod
-    def from_dict(cls, raw: dict[str, Any]) -> "HarnessConfig":
+    def from_dict(cls, raw: dict[str, Any]) -> HarnessConfig:
         known = set(cls.__dataclass_fields__)  # type: ignore[attr-defined]
         unknown = set(raw) - known
         if unknown:
@@ -254,7 +254,7 @@ class TrialResult:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, raw: dict[str, Any]) -> "TrialResult":
+    def from_dict(cls, raw: dict[str, Any]) -> TrialResult:
         steps = [Step(**s) for s in raw.pop("steps", [])]
         return cls(steps=steps, **raw)
 

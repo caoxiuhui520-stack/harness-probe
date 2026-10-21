@@ -7,7 +7,6 @@ import pytest
 
 from harnessprobe.spec import HarnessConfig, SpecError, Task, TrialResult
 
-
 # -- HarnessConfig --------------------------------------------------------
 
 

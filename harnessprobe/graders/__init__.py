@@ -33,7 +33,9 @@ def grade(task: Task, result: TrialResult, sandbox: Path) -> TrialResult:
     try:
         outcome = _DISPATCH[spec.type](task, spec, sandbox)
     except Exception as exc:  # a broken grader is a task bug, not a model bug
-        outcome = GradeResult(False, 0.0, f"grader crashed: {type(exc).__name__}: {exc}")
+        outcome = GradeResult(
+            False, 0.0, f"grader crashed: {type(exc).__name__}: {exc}"
+        )
     result.passed = outcome.passed
     result.score = outcome.score
     result.grader_output = outcome.output[:8000]
@@ -78,6 +80,7 @@ def _pytest(task: Task, spec: GraderSpec, sandbox: Path) -> GradeResult:
             timeout=spec.timeout,
             env=env,
             errors="replace",
+            check=False,
         )
     except subprocess.TimeoutExpired:
         return GradeResult(False, 0.0, f"pytest timed out after {spec.timeout}s")
@@ -91,7 +94,9 @@ def _exact(task: Task, spec: GraderSpec, sandbox: Path) -> GradeResult:
     target = _resolve_target(task, spec, sandbox)
     expected = Path(spec.target) if spec.target else task.grader_path
     if not expected.is_absolute():
-        expected = (task.root or Path(".")) / spec.options.get("expected", "expected.txt")
+        expected = (task.root or Path(".")) / spec.options.get(
+            "expected", "expected.txt"
+        )
     if not target.exists():
         return GradeResult(False, 0.0, f"missing output file: {target}")
     if not expected.exists():
@@ -99,7 +104,9 @@ def _exact(task: Task, spec: GraderSpec, sandbox: Path) -> GradeResult:
     got = target.read_text(encoding="utf-8", errors="replace").strip()
     want = expected.read_text(encoding="utf-8", errors="replace").strip()
     ok = got == want
-    return GradeResult(ok, 1.0 if ok else 0.0, "" if ok else f"got {got[:400]!r}\nwant {want[:400]!r}")
+    return GradeResult(
+        ok, 1.0 if ok else 0.0, "" if ok else f"got {got[:400]!r}\nwant {want[:400]!r}"
+    )
 
 
 def _regex(task: Task, spec: GraderSpec, sandbox: Path) -> GradeResult:
@@ -112,7 +119,9 @@ def _regex(task: Task, spec: GraderSpec, sandbox: Path) -> GradeResult:
     if not pattern:
         return GradeResult(False, 0.0, "regex grader needs options.pattern")
     ok = re.search(pattern, text, re.MULTILINE) is not None
-    return GradeResult(ok, 1.0 if ok else 0.0, "" if ok else f"pattern {pattern!r} not found")
+    return GradeResult(
+        ok, 1.0 if ok else 0.0, "" if ok else f"pattern {pattern!r} not found"
+    )
 
 
 def _diff(task: Task, spec: GraderSpec, sandbox: Path) -> GradeResult:
@@ -123,14 +132,24 @@ def _diff(task: Task, spec: GraderSpec, sandbox: Path) -> GradeResult:
         return GradeResult(False, 0.0, f"missing output file: {target}")
     if not golden.exists():
         return GradeResult(False, 0.0, f"missing golden file: {golden}")
-    got = [ln.rstrip() for ln in target.read_text(encoding="utf-8", errors="replace").splitlines()]
-    want = [ln.rstrip() for ln in golden.read_text(encoding="utf-8", errors="replace").splitlines()]
+    got = [
+        ln.rstrip()
+        for ln in target.read_text(encoding="utf-8", errors="replace").splitlines()
+    ]
+    want = [
+        ln.rstrip()
+        for ln in golden.read_text(encoding="utf-8", errors="replace").splitlines()
+    ]
     if got == want:
         return GradeResult(True, 1.0, "")
     for i, (a, b) in enumerate(zip(got, want), 1):
         if a != b:
-            return GradeResult(False, 0.0, f"first difference at line {i}: got {a!r}, want {b!r}")
-    return GradeResult(False, 0.0, f"length differs: got {len(got)} lines, want {len(want)}")
+            return GradeResult(
+                False, 0.0, f"first difference at line {i}: got {a!r}, want {b!r}"
+            )
+    return GradeResult(
+        False, 0.0, f"length differs: got {len(got)} lines, want {len(want)}"
+    )
 
 
 def _exit_code(task: Task, spec: GraderSpec, sandbox: Path) -> GradeResult:
@@ -141,6 +160,7 @@ def _exit_code(task: Task, spec: GraderSpec, sandbox: Path) -> GradeResult:
     try:
         proc = subprocess.run(
             command,
+            check=False,
             shell=True,
             cwd=str(sandbox),
             capture_output=True,
@@ -178,7 +198,11 @@ def _json_assert(task: Task, spec: GraderSpec, sandbox: Path) -> GradeResult:
             return GradeResult(False, 0.0, f"missing key {part!r} at {path}")
         node = node[part]
     ok = node == expected
-    return GradeResult(ok, 1.0 if ok else 0.0, "" if ok else f"at {path}: got {node!r}, want {expected!r}")
+    return GradeResult(
+        ok,
+        1.0 if ok else 0.0,
+        "" if ok else f"at {path}: got {node!r}, want {expected!r}",
+    )
 
 
 def _resolve_target(task: Task, spec: GraderSpec, sandbox: Path) -> Path:

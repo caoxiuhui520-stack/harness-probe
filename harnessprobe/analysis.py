@@ -20,11 +20,11 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any
 
 from .spec import TrialResult
-
 
 # --------------------------------------------------------------------------
 # Statistics helpers
@@ -206,7 +206,9 @@ def analyze(
     if base_cells is None:
         raise ValueError(f"baseline harness {baseline!r} not present in results")
     base_rate = sum(c.passes for c in base_cells) / max(1, sum(c.n for c in base_cells))
-    base_tokens = sum(c.tokens for c in base_cells) / max(1, sum(c.n for c in base_cells))
+    base_tokens = sum(c.tokens for c in base_cells) / max(
+        1, sum(c.n for c in base_cells)
+    )
 
     rows: list[HarnessRow] = []
     for harness, hcells in sorted(by_harness.items()):
@@ -293,8 +295,11 @@ def render_markdown(report: Report) -> str:
         f"- tasks: {report.task_count}  ·  trials per cell: {report.trials_per_cell}",
         f"- overall pass rate: {report.overall_pass_rate:.1%}",
         f"- **Harness Sensitivity Index: {report.hsi:.1%}**"
-        + (f"  (most sensitive to `{report.hsi_worst}`, most robust under `{report.hsi_best}`)"
-           if report.hsi_worst else ""),
+        + (
+            f"  (most sensitive to `{report.hsi_worst}`, most robust under `{report.hsi_best}`)"
+            if report.hsi_worst
+            else ""
+        ),
         "",
         "| harness | pass rate | delta vs baseline | 95% CI | tokens | token delta | steps | flakiness |",
         "|---|---:|---:|---|---:|---:|---:|---:|",

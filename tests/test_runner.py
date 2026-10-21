@@ -4,11 +4,9 @@ The history policies are the easiest thing to get subtly wrong, and a wrong
 policy silently changes what every run measures.
 """
 
-import pytest
-
+from harnessprobe.providers.base import Message, ToolCall
 from harnessprobe.runner import apply_history_policy, build_system_prompt
 from harnessprobe.spec import HarnessConfig
-from harnessprobe.providers.base import Message, ToolCall
 
 
 def assistant(text="", calls=()):
@@ -16,7 +14,12 @@ def assistant(text="", calls=()):
 
 
 def tool_result(i, content="output"):
-    return {"role": "tool", "tool_call_id": f"c{i}", "name": "read_file", "content": content}
+    return {
+        "role": "tool",
+        "tool_call_id": f"c{i}",
+        "name": "read_file",
+        "content": content,
+    }
 
 
 def build_history():
@@ -62,7 +65,9 @@ def test_full_policy_is_identity():
 
 def test_drop_policy_keeps_recent_results_intact():
     msgs = build_history()
-    out = apply_history_policy(msgs, HarnessConfig(history_policy="drop_old_tool_results"))
+    out = apply_history_policy(
+        msgs, HarnessConfig(history_policy="drop_old_tool_results")
+    )
     assert len(out) == len(msgs)
     elided = [m for m in out if m["role"] == "tool" and "elided" in m["content"]]
     assert len(elided) == 4  # 8 results, last 4 preserved
@@ -71,7 +76,9 @@ def test_drop_policy_keeps_recent_results_intact():
 
 def test_drop_policy_never_orphans_a_tool_call_id():
     msgs = build_history()
-    out = apply_history_policy(msgs, HarnessConfig(history_policy="drop_old_tool_results"))
+    out = apply_history_policy(
+        msgs, HarnessConfig(history_policy="drop_old_tool_results")
+    )
     call_ids = {c.id for m in out if m["role"] == "assistant" for c in m["tool_calls"]}
     result_ids = {m["tool_call_id"] for m in out if m["role"] == "tool"}
     assert result_ids <= call_ids
@@ -79,21 +86,27 @@ def test_drop_policy_never_orphans_a_tool_call_id():
 
 def test_keep_last_n_preserves_the_task_statement():
     msgs = build_history()
-    out = apply_history_policy(msgs, HarnessConfig(history_policy="keep_last_n", keep_last_n=4))
+    out = apply_history_policy(
+        msgs, HarnessConfig(history_policy="keep_last_n", keep_last_n=4)
+    )
     assert out[0]["content"] == "do the task"
     assert len(out) < len(msgs)
 
 
 def test_keep_last_n_never_starts_on_a_tool_result():
     msgs = build_history()
-    out = apply_history_policy(msgs, HarnessConfig(history_policy="keep_last_n", keep_last_n=5))
+    out = apply_history_policy(
+        msgs, HarnessConfig(history_policy="keep_last_n", keep_last_n=5)
+    )
     # After the head user message, the tail must begin with an assistant turn.
     assert out[1]["role"] == "assistant"
 
 
 def test_keep_last_n_is_a_noop_when_history_is_short():
     msgs = [{"role": "user", "content": "task"}, assistant("done")]
-    out = apply_history_policy(msgs, HarnessConfig(history_policy="keep_last_n", keep_last_n=10))
+    out = apply_history_policy(
+        msgs, HarnessConfig(history_policy="keep_last_n", keep_last_n=10)
+    )
     assert out == msgs
 
 

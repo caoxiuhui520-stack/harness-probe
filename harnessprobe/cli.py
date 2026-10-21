@@ -8,7 +8,6 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any
 
 from . import __version__
 from .analysis import analyze, render_markdown, render_per_task
@@ -165,7 +164,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         concurrency=args.concurrency,
     )
 
-    print(f"run {run_id}: {len(tasks)} tasks x {len(harnesses)} harnesses x {args.trials} trials = {total}")
+    print(
+        f"run {run_id}: {len(tasks)} tasks x {len(harnesses)} harnesses x {args.trials} trials = {total}"
+    )
     started = time.time()
     outcome = run_matrix(job, on_result=on_result, skip=done_keys)
     results = resumed + outcome.results
@@ -208,9 +209,15 @@ def cmd_grade(args: argparse.Namespace) -> int:
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     tasks = {t.id: t for t in load_tasks(args.tasks or ["tasks"])}
-    results = [TrialResult.from_dict(dict(r)) for r in json.loads(results_path.read_text(encoding="utf-8"))]
+    results = [
+        TrialResult.from_dict(dict(r))
+        for r in json.loads(results_path.read_text(encoding="utf-8"))
+    ]
 
-    print("re-grading needs the trial sandboxes; pass --keep-sandboxes when running", file=sys.stderr)
+    print(
+        "re-grading needs the trial sandboxes; pass --keep-sandboxes when running",
+        file=sys.stderr,
+    )
     missing = [r.task_id for r in results if r.task_id not in tasks]
     if missing:
         print(f"error: tasks not found for {sorted(set(missing))}", file=sys.stderr)
@@ -285,7 +292,9 @@ def cmd_compare(args: argparse.Namespace) -> int:
     print("Same matrix, same tasks, different models. A high HSI means the")
     print("model's measured score is mostly a property of its harness.")
     print()
-    print("| model | tasks | trials | pass rate | HSI | most helped by | most hurt by |")
+    print(
+        "| model | tasks | trials | pass rate | HSI | most helped by | most hurt by |"
+    )
     print("|---|---:|---:|---:|---:|---|---|")
     for r in sorted(reports, key=lambda x: -x.hsi):
         print(
@@ -386,7 +395,7 @@ def cmd_init(args: argparse.Namespace) -> int:
         "id": dest.name,
         "title": "One-line description of the task",
         "prompt": "Describe exactly what the agent must achieve. Name the file "
-                  "to change and the behaviour to produce.",
+        "to change and the behaviour to produce.",
         "max_steps": 15,
         "grader": {"type": "pytest", "target": "tests", "timeout": 120},
         "tags": ["example"],
@@ -421,16 +430,24 @@ def build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run", help="run a task x harness matrix")
     run.add_argument("tasks", nargs="+", help="task directories or a parent directory")
     run.add_argument("--matrix", required=True, help="harness matrix JSON file")
-    run.add_argument("--provider", default="mock", help="mock | anthropic | openai | deepseek | ...")
+    run.add_argument(
+        "--provider", default="mock", help="mock | anthropic | openai | deepseek | ..."
+    )
     run.add_argument("--model", default="mock-1")
-    run.add_argument("--trials", type=int, default=1, help="trials per (task, harness) cell")
+    run.add_argument(
+        "--trials", type=int, default=1, help="trials per (task, harness) cell"
+    )
     run.add_argument("--out", default=str(DEFAULT_RUNS_DIR))
     run.add_argument("--run-id", default="")
     run.add_argument("--max-tokens", type=int, default=4096)
     run.add_argument("--base-url", default=None)
-    run.add_argument("--delay", type=float, default=0.0, help="seconds between provider calls")
+    run.add_argument(
+        "--delay", type=float, default=0.0, help="seconds between provider calls"
+    )
     run.add_argument("--keep-sandboxes", action="store_true")
-    run.add_argument("--mock-script", default=None, help="trajectory JSON for the mock provider")
+    run.add_argument(
+        "--mock-script", default=None, help="trajectory JSON for the mock provider"
+    )
     run.add_argument(
         "--concurrency",
         type=int,

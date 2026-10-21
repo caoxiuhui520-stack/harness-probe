@@ -39,3 +39,10 @@ include = ["harnessprobe*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.ruff.lint]
+# BLE001 is disabled for two deliberate broad catches: a grader that raises is
+# a task bug that must fail the trial rather than kill the run, and a tool that
+# raises must surface as a tool error the model can read. Both are annotated at
+# the call site.
+extend-ignore = ["BLE001"]

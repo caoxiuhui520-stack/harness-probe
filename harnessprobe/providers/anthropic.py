@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import json
 import os
-import time
 import urllib.error
 import urllib.request
 from typing import Any
@@ -41,7 +40,9 @@ class AnthropicProvider(Provider):
         **kw: Any,
     ) -> None:
         super().__init__(model, **kw)
-        self.base_url = (self.base_url or os.environ.get("ANTHROPIC_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
+        self.base_url = (
+            self.base_url or os.environ.get("ANTHROPIC_BASE_URL") or DEFAULT_BASE_URL
+        ).rstrip("/")
         self.auth_token = self.auth_token or os.environ.get("ANTHROPIC_AUTH_TOKEN")
         self.api_key = self.api_key or os.environ.get("ANTHROPIC_API_KEY")
         if not (self.auth_token or self.api_key):
@@ -134,7 +135,9 @@ class AnthropicProvider(Provider):
         payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
         last: str = ""
         for attempt in range(self.max_retries + 1):
-            req = urllib.request.Request(url, data=payload, headers=self._headers(), method="POST")
+            req = urllib.request.Request(
+                url, data=payload, headers=self._headers(), method="POST"
+            )
             try:
                 # No proxy handler: a gateway on loopback must be reached
                 # directly, and urllib would otherwise consult the system
@@ -153,7 +156,9 @@ class AnthropicProvider(Provider):
             except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
                 last = f"{type(exc).__name__}: {exc}"
                 self._sleep(attempt)
-        raise ProviderError(f"anthropic call failed after {self.max_retries + 1} attempts: {last}")
+        raise ProviderError(
+            f"anthropic call failed after {self.max_retries + 1} attempts: {last}"
+        )
 
     def _complete_via_sdk(self, body: dict[str, Any]) -> LLMResponse:
         sdk = __import__("anthropic")
@@ -168,7 +173,9 @@ class AnthropicProvider(Provider):
             except sdk.APIStatusError as exc:
                 last = exc
                 if exc.status_code < 500:
-                    raise ProviderError(f"anthropic {exc.status_code}: {exc.message}") from exc
+                    raise ProviderError(
+                        f"anthropic {exc.status_code}: {exc.message}"
+                    ) from exc
                 self._sleep(attempt)
             except sdk.APIConnectionError as exc:
                 last = exc
@@ -193,10 +200,18 @@ def _to_anthropic(messages: list[Message]) -> list[dict[str, Any]]:
                 blocks.append({"type": "text", "text": msg["content"]})
             for call in msg.get("tool_calls", []):
                 blocks.append(
-                    {"type": "tool_use", "id": call.id, "name": call.name, "input": call.input}
+                    {
+                        "type": "tool_use",
+                        "id": call.id,
+                        "name": call.name,
+                        "input": call.input,
+                    }
                 )
             out.append(
-                {"role": "assistant", "content": blocks or [{"type": "text", "text": ""}]}
+                {
+                    "role": "assistant",
+                    "content": blocks or [{"type": "text", "text": ""}],
+                }
             )
         elif role == "tool":
             block = {
@@ -205,14 +220,20 @@ def _to_anthropic(messages: list[Message]) -> list[dict[str, Any]]:
                 "content": msg["content"],
             }
             # Parallel tool results must share a single user turn.
-            if out and out[-1]["role"] == "user" and isinstance(out[-1]["content"], list):
+            if (
+                out
+                and out[-1]["role"] == "user"
+                and isinstance(out[-1]["content"], list)
+            ):
                 out[-1]["content"].append(block)
             else:
                 out.append({"role": "user", "content": [block]})
     return out
 
 
-def _blocks_to_response(content: list[dict[str, Any]], usage: dict[str, Any], stop: str, model: str) -> LLMResponse:
+def _blocks_to_response(
+    content: list[dict[str, Any]], usage: dict[str, Any], stop: str, model: str
+) -> LLMResponse:
     texts: list[str] = []
     calls: list[ToolCall] = []
     for block in content or []:
@@ -220,7 +241,11 @@ def _blocks_to_response(content: list[dict[str, Any]], usage: dict[str, Any], st
             texts.append(block.get("text") or "")
         elif block.get("type") == "tool_use":
             calls.append(
-                ToolCall(id=block.get("id", ""), name=block.get("name", ""), input=dict(block.get("input") or {}))
+                ToolCall(
+                    id=block.get("id", ""),
+                    name=block.get("name", ""),
+                    input=dict(block.get("input") or {}),
+                )
             )
     return LLMResponse(
         text="\n".join(texts).strip(),
@@ -234,7 +259,10 @@ def _blocks_to_response(content: list[dict[str, Any]], usage: dict[str, Any], st
 
 def _from_anthropic(data: dict[str, Any], model: str) -> LLMResponse:
     return _blocks_to_response(
-        data.get("content") or [], data.get("usage") or {}, data.get("stop_reason", ""), model
+        data.get("content") or [],
+        data.get("usage") or {},
+        data.get("stop_reason", ""),
+        model,
     )
 
 
@@ -245,7 +273,12 @@ def _from_sdk(resp: Any, model: str) -> LLMResponse:
             content.append({"type": "text", "text": block.text})
         elif block.type == "tool_use":
             content.append(
-                {"type": "tool_use", "id": block.id, "name": block.name, "input": dict(block.input)}
+                {
+                    "type": "tool_use",
+                    "id": block.id,
+                    "name": block.name,
+                    "input": dict(block.input),
+                }
             )
     usage = getattr(resp, "usage", None)
     return _blocks_to_response(

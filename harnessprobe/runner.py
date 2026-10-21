@@ -74,7 +74,9 @@ def apply_history_policy(messages: list[Message], cfg: HarnessConfig) -> list[Me
         out: list[Message] = []
         for i, msg in enumerate(messages):
             if msg["role"] == "tool" and i not in keep:
-                out.append({**msg, "content": "[older tool output elided to save context]"})
+                out.append(
+                    {**msg, "content": "[older tool output elided to save context]"}
+                )
             else:
                 out.append(msg)
         return out
@@ -114,7 +116,14 @@ def run_trial(ctx: TrialContext) -> TrialResult:
     task, cfg = ctx.task, ctx.cfg
     sandbox = Sandbox(ctx.sandbox_root, task.readonly)
     executor = make_executor(sandbox)
-    tool_names = cfg.tool_set or ["read_file", "write_file", "list_dir", "search", "run_command", "submit"]
+    tool_names = cfg.tool_set or [
+        "read_file",
+        "write_file",
+        "list_dir",
+        "search",
+        "run_command",
+        "submit",
+    ]
     # `submit` is the loop's exit signal, not an optional capability.
     if "submit" not in tool_names:
         tool_names = [*tool_names, "submit"]
@@ -272,7 +281,9 @@ class MatrixOutcome:
     results: list[TrialResult] = field(default_factory=list)
 
 
-def _run_one(job: MatrixJob, task: Task, cfg: HarnessConfig, trial: int, sandbox_base: Path) -> TrialResult:
+def _run_one(
+    job: MatrixJob, task: Task, cfg: HarnessConfig, trial: int, sandbox_base: Path
+) -> TrialResult:
     label = _safe(f"{task.id}__{cfg.name}__t{trial}")
     sandbox_root = sandbox_base / label
     copy_workspace(task.workspace_path, sandbox_root)
@@ -390,8 +401,10 @@ def _stage_tests(task: Task, sandbox_root: Path) -> None:
 def summarize_trace(result: TrialResult, limit: int = 2000) -> str:
     """Compact human-readable trace for reports and debugging."""
     lines = [
-        f"task={result.task_id} harness={result.harness} trial={result.trial} "
-        f"passed={result.passed} stop={result.stop_reason}",
+        (
+            f"task={result.task_id} harness={result.harness} trial={result.trial} "
+            f"passed={result.passed} stop={result.stop_reason}"
+        ),
     ]
     if result.error:
         lines.append(f"error: {result.error}")

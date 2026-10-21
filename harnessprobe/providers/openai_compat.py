@@ -92,7 +92,9 @@ class OpenAICompatProvider(Provider):
 
         last: Exception | None = None
         for attempt in range(self.max_retries + 1):
-            req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+            req = urllib.request.Request(
+                url, data=payload, headers=headers, method="POST"
+            )
             try:
                 with urllib.request.urlopen(req, timeout=self.timeout) as fh:
                     data = json.loads(fh.read().decode("utf-8"))
@@ -117,7 +119,10 @@ def _to_openai(messages: list[Message]) -> list[dict[str, Any]]:
         if role == "user":
             out.append({"role": "user", "content": msg["content"]})
         elif role == "assistant":
-            entry: dict[str, Any] = {"role": "assistant", "content": msg.get("content") or None}
+            entry: dict[str, Any] = {
+                "role": "assistant",
+                "content": msg.get("content") or None,
+            }
             calls = msg.get("tool_calls", [])
             if calls:
                 entry["tool_calls"] = [
@@ -155,7 +160,11 @@ def _from_openai(data: dict[str, Any], model: str) -> LLMResponse:
             # Truncated or malformed arguments are a real model failure mode;
             # surface them as an empty call rather than crashing the trial.
             args = {"__parse_error__": fn.get("arguments")}
-        calls.append(ToolCall(id=raw.get("id") or f"call_{i}", name=fn.get("name", ""), input=args))
+        calls.append(
+            ToolCall(
+                id=raw.get("id") or f"call_{i}", name=fn.get("name", ""), input=args
+            )
+        )
     usage = data.get("usage") or {}
     return LLMResponse(
         text=(message.get("content") or "").strip(),

@@ -17,7 +17,6 @@ without running pytest against every task.
 
 from __future__ import annotations
 
-import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -105,12 +104,21 @@ def _run_pytest(task_dir: Path) -> tuple[bool, str]:
         ws = Path(tmp)
         shutil.copytree(task.workspace_path, ws, dirs_exist_ok=True)
         proc = subprocess.run(
-            [sys.executable, "-m", "pytest", str(tests), "-q", "--no-header",
-             "-p", "no:cacheprovider"],
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                str(tests),
+                "-q",
+                "--no-header",
+                "-p",
+                "no:cacheprovider",
+            ],
             cwd=ws,
             capture_output=True,
             text=True,
             errors="replace",
+            check=False,
         )
     # rc 0 == every test passed == the task is NOT pristine.
     return proc.returncode != 0, (proc.stdout or "")[-400:]
@@ -469,12 +477,21 @@ def check_solutions(root: Path) -> int:
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 dest.write_text(text, encoding="utf-8")
             proc = subprocess.run(
-                [sys.executable, "-m", "pytest", str(tests), "-q", "--no-header",
-                 "-p", "no:cacheprovider"],
+                [
+                    sys.executable,
+                    "-m",
+                    "pytest",
+                    str(tests),
+                    "-q",
+                    "--no-header",
+                    "-p",
+                    "no:cacheprovider",
+                ],
                 cwd=ws,
                 capture_output=True,
                 text=True,
                 errors="replace",
+                check=False,
             )
         if proc.returncode == 0:
             print(f"ok   {task_id} (reference solution passes)")

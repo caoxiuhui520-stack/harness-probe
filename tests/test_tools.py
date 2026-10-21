@@ -9,14 +9,18 @@ from harnessprobe.tools import Sandbox, ToolError, build_tool_specs
 def sandbox(tmp_path):
     (tmp_path / "hello.txt").write_text("line one\nline two\n", encoding="utf-8")
     (tmp_path / "sub").mkdir()
-    (tmp_path / "sub" / "nested.py").write_text("def f():\n    return 42\n", encoding="utf-8")
+    (tmp_path / "sub" / "nested.py").write_text(
+        "def f():\n    return 42\n", encoding="utf-8"
+    )
     return Sandbox(tmp_path)
 
 
 # -- confinement ----------------------------------------------------------
 
 
-@pytest.mark.parametrize("bad", ["../outside.txt", "../../etc/passwd", "sub/../../escape.txt"])
+@pytest.mark.parametrize(
+    "bad", ["../outside.txt", "../../etc/passwd", "sub/../../escape.txt"]
+)
 def test_parent_traversal_is_rejected(sandbox, bad):
     with pytest.raises(ToolError, match="escapes the workspace"):
         sandbox.resolve(bad)
@@ -56,7 +60,9 @@ def test_read_file_respects_offset_and_limit(sandbox):
 def test_write_file_creates_parents(sandbox, tmp_path):
     out = sandbox.write_file("deep/a/b/new.txt", "content")
     assert not out.is_error
-    assert (tmp_path / "deep" / "a" / "b" / "new.txt").read_text(encoding="utf-8") == "content"
+    assert (tmp_path / "deep" / "a" / "b" / "new.txt").read_text(
+        encoding="utf-8"
+    ) == "content"
 
 
 def test_readonly_files_cannot_be_written(tmp_path):

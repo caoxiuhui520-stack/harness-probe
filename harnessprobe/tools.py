@@ -161,7 +161,11 @@ def build_tool_specs(
     tool_names: list[str], description_style: str = "full"
 ) -> list[dict[str, Any]]:
     """Render tool definitions for a provider, at the requested verbosity."""
-    style = description_style if description_style in ("full", "terse", "minimal") else "full"
+    style = (
+        description_style
+        if description_style in ("full", "terse", "minimal")
+        else "full"
+    )
     specs = []
     for name in tool_names:
         if name not in _SCHEMAS:
@@ -245,7 +249,9 @@ class Sandbox:
         except OSError as exc:
             return ToolResult(f"error: {exc}", is_error=True)
         n = len(content.encode("utf-8"))
-        return ToolResult(f"wrote {path} ({n} bytes, {content.count(chr(10)) + 1} lines)")
+        return ToolResult(
+            f"wrote {path} ({n} bytes, {content.count(chr(10)) + 1} lines)"
+        )
 
     def list_dir(self, path: str = ".") -> ToolResult:
         p = self.resolve(path)
@@ -287,6 +293,7 @@ class Sandbox:
         try:
             proc = subprocess.run(
                 command,
+                check=False,
                 shell=True,
                 cwd=str(self.root),
                 capture_output=True,
@@ -296,7 +303,9 @@ class Sandbox:
                 errors="replace",
             )
         except subprocess.TimeoutExpired:
-            return ToolResult(f"error: command timed out after {timeout}s", is_error=True)
+            return ToolResult(
+                f"error: command timed out after {timeout}s", is_error=True
+            )
         except OSError as exc:
             return ToolResult(f"error: {exc}", is_error=True)
         parts = []

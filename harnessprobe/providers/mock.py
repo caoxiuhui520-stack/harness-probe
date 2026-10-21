@@ -21,7 +21,13 @@ from .base import LLMResponse, Message, Provider, ToolCall
 class MockProvider(Provider):
     name = "mock"
 
-    def __init__(self, model: str = "mock-1", *, script: dict[str, list[dict]] | None = None, **kw: Any) -> None:
+    def __init__(
+        self,
+        model: str = "mock-1",
+        *,
+        script: dict[str, list[dict]] | None = None,
+        **kw: Any,
+    ) -> None:
         super().__init__(model, **kw)
         self._script = script or {}
         self._calls = 0
@@ -49,7 +55,9 @@ class MockProvider(Provider):
         action = plan[step]
         name = action["tool"]
         if name not in available:
-            return _call("submit", {"summary": f"mock: tool {name} unavailable"}, self._calls)
+            return _call(
+                "submit", {"summary": f"mock: tool {name} unavailable"}, self._calls
+            )
         return _call(name, action.get("input", {}), self._calls)
 
 
@@ -79,7 +87,9 @@ def _default_plan(available: set[str]) -> list[dict[str, Any]]:
     if "list_dir" in available:
         plan.append({"tool": "list_dir", "input": {"path": "."}})
     if "run_command" in available:
-        plan.append({"tool": "run_command", "input": {"command": "echo mock", "timeout": 10}})
+        plan.append(
+            {"tool": "run_command", "input": {"command": "echo mock", "timeout": 10}}
+        )
     plan.append({"tool": "submit", "input": {"summary": "mock run"}})
     return plan
 

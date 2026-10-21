@@ -10,10 +10,10 @@ from .mock import MockProvider, load_script
 __all__ = [
     "LLMResponse",
     "Message",
+    "MockProvider",
     "Provider",
     "ProviderError",
     "ToolCall",
-    "MockProvider",
     "build_provider",
 ]
 
@@ -35,7 +35,17 @@ def build_provider(provider: str, model: str, **kwargs: Any) -> Provider:
         from .anthropic import AnthropicProvider
 
         return AnthropicProvider(model, **kwargs)
-    if provider in ("openai", "deepseek", "moonshot", "qwen", "openrouter", "ollama", "lmstudio", "vllm", "openai-compat"):
+    if provider in (
+        "openai",
+        "deepseek",
+        "moonshot",
+        "qwen",
+        "openrouter",
+        "ollama",
+        "lmstudio",
+        "vllm",
+        "openai-compat",
+    ):
         from .openai_compat import OpenAICompatProvider
 
         vendor = "openai" if provider == "openai-compat" else provider

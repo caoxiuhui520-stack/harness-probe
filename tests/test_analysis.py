@@ -1,7 +1,5 @@
 """Tests for the statistics. These numbers end up in published reports."""
 
-import math
-
 import pytest
 
 from harnessprobe.analysis import (

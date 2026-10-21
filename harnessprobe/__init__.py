@@ -6,10 +6,10 @@ from .analysis import analyze, render_markdown, render_per_task
 from .spec import HarnessConfig, Task, TrialResult
 
 __all__ = [
-    "__version__",
     "HarnessConfig",
     "Task",
     "TrialResult",
+    "__version__",
     "analyze",
     "render_markdown",
     "render_per_task",

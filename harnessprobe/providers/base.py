@@ -90,7 +90,7 @@ class Provider:
     # -- helpers -----------------------------------------------------------
 
     def _sleep(self, attempt: int) -> None:
-        delay = min(2.0 ** attempt, 30.0)
+        delay = min(2.0**attempt, 30.0)
         time.sleep(delay)
 
     def __repr__(self) -> str:
