@@ -67,13 +67,15 @@ prints that ceiling rather than hiding it — see
 A capability regression and a prompt regression look identical on a benchmark.
 If a new checkpoint scores 3 points lower, is the model worse, or did the
 harness's step budget stop fitting its longer reasoning traces? Run the matrix:
-if the model's HSI *rose*, the harness is the problem, and the fix is in the
-scaffold, not the training run.
+if the sensitivity *rose*, the harness is the leading suspect, and the scaffold
+is where to look first.
 
-HSI is also a useful training signal. A model that is highly sensitive to tool
-descriptions is a model that has not learned to use tools robustly — it is
-pattern-matching the description rather than reasoning about the interface.
-That is a measurable, trackable property.
+HSI is also worth tracking over time — but as a measurement, not a diagnosis. A
+model that is highly sensitive to tool descriptions *may* be one that has not
+learned to use tools robustly; it may equally be a model whose reasoning traces
+are longer than the budget, or a task set sitting at the edge of its ability.
+Telling those apart needs a dose-response experiment, not a single delta. See
+[docs/metrics.md](docs/metrics.md#what-hsi-is-and-is-not).
 
 ### For harness and product developers
 

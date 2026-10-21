@@ -59,16 +59,52 @@ HSI = mean( |delta(h)| ) over all non-baseline harnesses h
 
 The mean absolute deviation of measured quality across harness configurations.
 
-| HSI | interpretation |
-|---|---|
-| < 5% | robust. The model's score is mostly the model. |
-| 5–15% | normal. Harness choices matter but do not dominate. |
-| 15–30% | sensitive. Report the harness alongside the score, always. |
-| > 30% | the score is mostly the harness. Do not compare this number to another model's without matching harnesses. |
+### Read it with max degradation, never alone
 
-HSI is a property of the **model**, not of the harness set — but it is only
-comparable across models when the same matrix was used. Always report the
-matrix alongside it.
+HSI is a mean, so it hides a single large regression. Ten harnesses at 0 pp
+plus one at -16 pp gives an HSI of 1.7%, which reads as "not sensitive" — and
+is exactly the case where the harness mattered most. Always report both:
+
+```
+HSI:              1.7%
+Max degradation:  -16.7% under `no-shell`
+```
+
+### What HSI is and is not
+
+HSI is **not a property of the model**. It is a measurement of one model
+against one task distribution, one harness matrix and one experiment budget.
+Change any of the three and the number changes. Two models are only comparable
+when all three match, and even then the comparison is of *measurements*, not of
+intrinsic model attributes.
+
+The table below is a reading aid, not a validated scale. The thresholds are
+conventions chosen for this tool, not calibrated cut points with established
+error rates behind them.
+
+| HSI | a reasonable reading |
+|---|---|
+| < 5% | little movement across this matrix |
+| 5–15% | harness choices are visible but not dominant |
+| 15–30% | harness choices are a large share of the measured score |
+| > 30% | the score is mostly the harness under this matrix |
+
+### The claim to avoid
+
+"A high tool-description sensitivity means the model has not learned to use
+tools robustly, and is pattern-matching the interface."
+
+That is a **hypothesis**, not a finding. HSI measures a correlation between a
+configuration change and a score change. It does not identify the mechanism,
+and at least three mechanisms produce the same number: the model may be
+brittle to interface variation, the task may be near the edge of its ability so
+any perturbation tips it, or the changed knob may have altered the effective
+difficulty (a tighter step budget can make a solvable task unsolvable for a
+model that reasons at length, with no brittleness involved at all).
+
+Separating those needs a dose-response experiment — vary one knob across
+several values and watch the curve — not a single delta.
+
 
 The report also names `hsi_worst` (the harness that helped most) and
 `hsi_best` (the harness that hurt most), which is usually more actionable than
