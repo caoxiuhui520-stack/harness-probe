@@ -44,13 +44,11 @@ jobs:
       - name: Reference solutions still pass
         run: python -m harnessprobe check-solutions tasks
 
+      # The Windows runner defaults to PowerShell, where a trailing backslash
+      # is not a line continuation. Keep this command on one line so the same
+      # step works under both bash and pwsh.
       - name: Offline end-to-end run
-        run: |
-          python -m harnessprobe run tasks \
-            --matrix configs/matrix-core.json \
-            --provider mock --model mock-1 \
-            --mock-script tests/mock_script.json \
-            --trials 1 --out .harnessprobe/ci
+        run: python -m harnessprobe run tasks --matrix configs/matrix-core.json --provider mock --model mock-1 --mock-script tests/mock_script.json --trials 1 --out .harnessprobe/ci
 
       - name: Check the report was produced
         run: python -c "import pathlib,sys; p=sorted(pathlib.Path('.harnessprobe/ci').glob('*/report.md')); sys.exit(0 if p else 1)"
