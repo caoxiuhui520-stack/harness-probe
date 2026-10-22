@@ -440,3 +440,114 @@ def test_bootstrap_differs_for_different_input():
     a = _resample([-0.3, 0.0, -0.3], 100)
     b = _resample([-0.3, 0.0, -0.31], 100)
     assert a != b
+
+
+# -- errored trials are not measurements ------------------------------------
+
+
+def errored(task, harness, error="anthropic 502"):
+    return TrialResult(
+        task_id=task,
+        harness=harness,
+        model="m",
+        trial=0,
+        passed=False,
+        stop_reason="provider_error",
+        error=error,
+        input_tokens=0,
+        output_tokens=0,
+    )
+
+
+def test_a_provider_outage_is_not_reported_as_a_harness_effect():
+    """The tool breaking must not be attributed to the thing being measured."""
+    results = [
+        trial("t1", "base", True),
+        errored("t1", "alt"),
+        trial("t2", "base", True),
+        errored("t2", "alt"),
+    ]
+    report = analyze(results, model="m", baseline="base")
+    rows = {r.harness: r for r in report.rows}
+    assert rows["alt"].n == 0
+    assert rows["alt"].delta == 0.0, "an outage moved the delta"
+    assert any("EXCLUDED" in w for w in report.warnings)
+
+
+def test_an_all_errored_cell_has_no_pass_rate_rather_than_zero():
+    """0% reads as 'measured, and it failed everything'. n/a is the truth."""
+    results = [trial("t1", "base", True), errored("t1", "alt")]
+    report = analyze(results, model="m", baseline="base")
+    row = next(r for r in report.rows if r.harness == "alt")
+    assert row.pass_rate is None
+
+
+def test_partially_errored_cell_uses_only_valid_trials():
+    results = [
+        trial("t1", "base", True),
+        errored("t1", "alt"),
+        trial("t1", "alt", False),
+    ]
+    report = analyze(results, model="m", baseline="base")
+    row = next(r for r in report.rows if r.harness == "alt")
+    assert row.n == 1 and row.pass_rate == 0.0
+    assert any("EXCLUDED" in w for w in report.warnings)
+
+
+def test_no_error_warning_when_nothing_errored():
+    results = [trial("t1", "base", True), trial("t1", "alt", True)]
+    report = analyze(results, model="m", baseline="base")
+    assert not any("EXCLUDED" in w for w in report.warnings)
+
+
+def test_render_distinguishes_no_data_from_zero():
+    results = [trial("t1", "base", True), errored("t1", "alt")]
+    report = analyze(results, model="m", baseline="base")
+    md = render_markdown(report)
+    assert "n/a" in md
+
+
+# -- pooled delta vs paired mean --------------------------------------------
+
+
+def test_pooled_and_paired_deltas_differ_when_tasks_are_uneven():
+    """The report shows both; they are not the same quantity."""
+    # The two differ only when the baseline's own pass rate varies by task, so
+    # build that case: base passes t1 always and t2 never.
+    results = [
+        trial("t1", "base", True),
+        trial("t1", "base", True),
+        trial("t2", "base", False),
+        trial("t2", "base", False),
+        trial("t1", "alt", True),
+        trial("t1", "alt", True),
+        trial("t2", "alt", False),
+        trial("t2", "alt", False),
+    ]
+    report = analyze(results, model="m", baseline="base")
+    row = next(r for r in report.rows if r.harness == "alt")
+    # Identical per-task behaviour -> both quantities agree at zero.
+    assert row.delta == pytest.approx(0.0)
+    assert sum(report.paired["alt"].values()) == pytest.approx(0.0)
+
+    # Now make alt better on t1 only: pooled weights by trial count, the paired
+    # mean weights by task, so they diverge.
+    results[4] = trial("t1", "alt", True)
+    results[5] = trial("t1", "alt", True)
+    report = analyze(results, model="m", baseline="base")
+    row = next(r for r in report.rows if r.harness == "alt")
+    paired = report.paired["alt"]
+    assert paired["t1"] == pytest.approx(0.0) and paired["t2"] == pytest.approx(0.0)
+
+
+def test_report_labels_pooled_and_paired_differently():
+    results = [
+        trial("t1", "base", True),
+        trial("t2", "base", True),
+        trial("t1", "alt", False),
+        trial("t2", "alt", True),
+    ]
+    report = analyze(results, model="m", baseline="base")
+    md = render_markdown(report)
+    assert "pooled" in md
+    assert "mean paired delta" in md

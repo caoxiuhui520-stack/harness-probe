@@ -1,0 +1,305 @@
+{
+  "model": "workbuddy-ai/deepseek-v4.1-flash",
+  "baseline": "baseline",
+  "trials_per_cell": 1,
+  "overall_pass_rate": 0.9855072463768116,
+  "complete": true,
+  "task_count": 3,
+  "hsi": 0.016666666666666663,
+  "hsi_worst": "no-shell",
+  "hsi_best": "drop-old-output",
+  "max_degradation": -0.1667,
+  "paired": {
+    "no-reasoning-hint": {
+      "01-fix-off-by-one": 0.0,
+      "02-implement-cli-flag": 0.0,
+      "03-refactor-duplication": 0.0
+    },
+    "terse-tools": {
+      "01-fix-off-by-one": 0.0,
+      "02-implement-cli-flag": 0.0
+    },
+    "minimal-tools": {
+      "01-fix-off-by-one": 0.0,
+      "02-implement-cli-flag": 0.0
+    },
+    "no-search": {
+      "01-fix-off-by-one": 0.0,
+      "02-implement-cli-flag": 0.0
+    },
+    "no-shell": {
+      "01-fix-off-by-one": -0.3333,
+      "02-implement-cli-flag": 0.0
+    },
+    "tight-budget": {
+      "01-fix-off-by-one": 0.0,
+      "02-implement-cli-flag": 0.0
+    },
+    "loose-budget": {
+      "01-fix-off-by-one": 0.0,
+      "02-implement-cli-flag": 0.0
+    },
+    "drop-old-output": {
+      "01-fix-off-by-one": 0.0,
+      "02-implement-cli-flag": 0.0
+    },
+    "no-retry-nudge": {
+      "01-fix-off-by-one": 0.0,
+      "02-implement-cli-flag": 0.0
+    },
+    "verbose-system": {
+      "01-fix-off-by-one": 0.0,
+      "02-implement-cli-flag": 0.0
+    }
+  },
+  "paired_ci": {
+    "no-reasoning-hint": [
+      0.0,
+      0.0
+    ],
+    "terse-tools": [
+      0.0,
+      0.0
+    ],
+    "minimal-tools": [
+      0.0,
+      0.0
+    ],
+    "no-search": [
+      0.0,
+      0.0
+    ],
+    "no-shell": [
+      -0.3333,
+      0.0
+    ],
+    "tight-budget": [
+      0.0,
+      0.0
+    ],
+    "loose-budget": [
+      0.0,
+      0.0
+    ],
+    "drop-old-output": [
+      0.0,
+      0.0
+    ],
+    "no-retry-nudge": [
+      0.0,
+      0.0
+    ],
+    "verbose-system": [
+      0.0,
+      0.0
+    ]
+  },
+  "warnings": [
+    "only 1 trial(s) per cell — confidence intervals are very wide; use --trials 3 or more before drawing conclusions",
+    "at least one cell has a CI wider than 0.5; the sample is too small to separate harnesses that differ by less than ~30 points",
+    "only 3 task(s) — a single unlucky task dominates the mean"
+  ],
+  "knobs": {},
+  "harnesses": [
+    {
+      "harness": "baseline",
+      "n": 8,
+      "pass_rate": 1.0,
+      "ci": [
+        0.6756,
+        1.0
+      ],
+      "delta": 0.0,
+      "mean_tokens": 4096.6,
+      "token_delta_pct": 0.0,
+      "mean_steps": 10.25,
+      "flakiness": null,
+      "per_task": {
+        "01-fix-off-by-one": 1.0,
+        "02-implement-cli-flag": 1.0,
+        "03-refactor-duplication": 1.0
+      }
+    },
+    {
+      "harness": "drop-old-output",
+      "n": 6,
+      "pass_rate": 1.0,
+      "ci": [
+        0.6097,
+        1.0
+      ],
+      "delta": 0.0,
+      "mean_tokens": 12418.0,
+      "token_delta_pct": 203.13,
+      "mean_steps": 11.67,
+      "flakiness": null,
+      "per_task": {
+        "01-fix-off-by-one": 1.0,
+        "02-implement-cli-flag": 1.0
+      }
+    },
+    {
+      "harness": "loose-budget",
+      "n": 6,
+      "pass_rate": 1.0,
+      "ci": [
+        0.6097,
+        1.0
+      ],
+      "delta": 0.0,
+      "mean_tokens": 3408.2,
+      "token_delta_pct": -16.81,
+      "mean_steps": 8.67,
+      "flakiness": null,
+      "per_task": {
+        "01-fix-off-by-one": 1.0,
+        "02-implement-cli-flag": 1.0
+      }
+    },
+    {
+      "harness": "minimal-tools",
+      "n": 6,
+      "pass_rate": 1.0,
+      "ci": [
+        0.6097,
+        1.0
+      ],
+      "delta": 0.0,
+      "mean_tokens": 3682.2,
+      "token_delta_pct": -10.12,
+      "mean_steps": 9.17,
+      "flakiness": null,
+      "per_task": {
+        "01-fix-off-by-one": 1.0,
+        "02-implement-cli-flag": 1.0
+      }
+    },
+    {
+      "harness": "no-reasoning-hint",
+      "n": 7,
+      "pass_rate": 1.0,
+      "ci": [
+        0.6457,
+        1.0
+      ],
+      "delta": 0.0,
+      "mean_tokens": 2538.9,
+      "token_delta_pct": -38.03,
+      "mean_steps": 6.29,
+      "flakiness": null,
+      "per_task": {
+        "01-fix-off-by-one": 1.0,
+        "02-implement-cli-flag": 1.0,
+        "03-refactor-duplication": 1.0
+      }
+    },
+    {
+      "harness": "no-retry-nudge",
+      "n": 6,
+      "pass_rate": 1.0,
+      "ci": [
+        0.6097,
+        1.0
+      ],
+      "delta": 0.0,
+      "mean_tokens": 4938.5,
+      "token_delta_pct": 20.55,
+      "mean_steps": 13.83,
+      "flakiness": null,
+      "per_task": {
+        "01-fix-off-by-one": 1.0,
+        "02-implement-cli-flag": 1.0
+      }
+    },
+    {
+      "harness": "no-search",
+      "n": 6,
+      "pass_rate": 1.0,
+      "ci": [
+        0.6097,
+        1.0
+      ],
+      "delta": 0.0,
+      "mean_tokens": 4238.8,
+      "token_delta_pct": 3.47,
+      "mean_steps": 10.5,
+      "flakiness": null,
+      "per_task": {
+        "01-fix-off-by-one": 1.0,
+        "02-implement-cli-flag": 1.0
+      }
+    },
+    {
+      "harness": "no-shell",
+      "n": 6,
+      "pass_rate": 0.8333,
+      "ci": [
+        0.4365,
+        0.9699
+      ],
+      "delta": -0.1667,
+      "mean_tokens": 2561.5,
+      "token_delta_pct": -37.47,
+      "mean_steps": 5.67,
+      "flakiness": null,
+      "per_task": {
+        "01-fix-off-by-one": 0.6667,
+        "02-implement-cli-flag": 1.0
+      }
+    },
+    {
+      "harness": "terse-tools",
+      "n": 6,
+      "pass_rate": 1.0,
+      "ci": [
+        0.6097,
+        1.0
+      ],
+      "delta": 0.0,
+      "mean_tokens": 4468.7,
+      "token_delta_pct": 9.08,
+      "mean_steps": 11.83,
+      "flakiness": null,
+      "per_task": {
+        "01-fix-off-by-one": 1.0,
+        "02-implement-cli-flag": 1.0
+      }
+    },
+    {
+      "harness": "tight-budget",
+      "n": 6,
+      "pass_rate": 1.0,
+      "ci": [
+        0.6097,
+        1.0
+      ],
+      "delta": 0.0,
+      "mean_tokens": 2913.5,
+      "token_delta_pct": -28.88,
+      "mean_steps": 7.17,
+      "flakiness": null,
+      "per_task": {
+        "01-fix-off-by-one": 1.0,
+        "02-implement-cli-flag": 1.0
+      }
+    },
+    {
+      "harness": "verbose-system",
+      "n": 6,
+      "pass_rate": 1.0,
+      "ci": [
+        0.6097,
+        1.0
+      ],
+      "delta": 0.0,
+      "mean_tokens": 4103.3,
+      "token_delta_pct": 0.16,
+      "mean_steps": 10.0,
+      "flakiness": null,
+      "per_task": {
+        "01-fix-off-by-one": 1.0,
+        "02-implement-cli-flag": 1.0
+      }
+    }
+  ]
+}

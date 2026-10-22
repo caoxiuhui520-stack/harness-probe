@@ -92,6 +92,10 @@ class Cell:
     steps: int = 0
     stop_reasons: dict[str, int] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
+    # Trials that never produced a measurement — a provider error, a crash.
+    # Excluded from pass_rate: counting them as failures attributes the tool's
+    # own breakage to the harness being measured.
+    errored: int = 0
 
     @property
     def pass_rate(self) -> float:
@@ -115,14 +119,19 @@ def aggregate(results: Iterable[TrialResult]) -> dict[tuple[str, str], Cell]:
     for r in results:
         key = (r.task_id, r.harness)
         cell = cells.setdefault(key, Cell(task_id=r.task_id, harness=r.harness))
+        cell.stop_reasons[r.stop_reason] = cell.stop_reasons.get(r.stop_reason, 0) + 1
+        if r.error:
+            # Not a measurement. Recorded so it stays visible, and excluded
+            # from the denominator so a provider outage cannot masquerade as a
+            # harness effect.
+            cell.errors.append(r.error)
+            cell.errored += 1
+            continue
         cell.n += 1
         cell.passes += int(r.passed)
         cell.tokens += r.total_tokens
         cell.wall_ms += r.wall_ms
         cell.steps += len([s for s in r.steps if s.kind == "assistant"])
-        cell.stop_reasons[r.stop_reason] = cell.stop_reasons.get(r.stop_reason, 0) + 1
-        if r.error:
-            cell.errors.append(r.error)
     return cells
 
 
@@ -135,7 +144,9 @@ def aggregate(results: Iterable[TrialResult]) -> dict[tuple[str, str], Cell]:
 class HarnessRow:
     harness: str
     n: int
-    pass_rate: float
+    # None when every trial in the cell errored: no measurement exists,
+    # which is different from a measured zero.
+    pass_rate: float | None
     ci_low: float
     ci_high: float
     delta: float  # vs baseline, absolute percentage points
@@ -208,7 +219,7 @@ class Report:
                 {
                     "harness": r.harness,
                     "n": r.n,
-                    "pass_rate": round(r.pass_rate, 4),
+                    "pass_rate": None if r.pass_rate is None else round(r.pass_rate, 4),
                     "ci": [round(r.ci_low, 4), round(r.ci_high, 4)],
                     "delta": round(r.delta, 4),
                     "mean_tokens": round(r.mean_tokens, 1),
@@ -333,7 +344,9 @@ def analyze(
         n = sum(c.n for c in hcells)
         passes = sum(c.passes for c in hcells)
         tokens = sum(c.tokens for c in hcells)
-        rate = passes / n if n else 0.0
+        # n == 0 means every trial in this cell errored. Reporting 0% would
+        # read as "measured, and it passed nothing"; None renders as "no data".
+        rate = passes / n if n else None
         low, high = wilson_interval(passes, n)
 
         # Flakiness: average over tasks of (1 - pass^k / pass@k).
@@ -356,10 +369,12 @@ def analyze(
                 pass_rate=rate,
                 ci_low=low,
                 ci_high=high,
-                delta=rate - base_rate,
+                # No valid trials -> no measurable delta. Zero would claim the
+                # harness matched the baseline, which is not what happened.
+                delta=(rate - base_rate) if rate is not None else 0.0,
                 mean_tokens=tokens / n if n else 0.0,
                 token_delta_pct=((tokens / n) - base_tokens) / base_tokens * 100
-                if base_tokens
+                if (base_tokens and n)
                 else 0.0,
                 mean_steps=sum(c.steps for c in hcells) / n if n else 0.0,
                 flakiness=flakiness,
@@ -394,6 +409,22 @@ def analyze(
         best = None
 
     warnings: list[str] = []
+
+    # Trials that died before producing a measurement are excluded from every
+    # rate. Silently dropping them would let an outage look like a clean run,
+    # so the count is stated rather than implied.
+    total_errored = sum(c.errored for c in cells.values())
+    if total_errored:
+        affected = sorted(
+            {harness for (_task, harness), c in cells.items() if c.errored}
+        )
+        warnings.append(
+            f"{total_errored} trial(s) failed before producing a measurement "
+            "(provider error or crash) and are EXCLUDED from every rate below. "
+            f"Affected harnesses: {', '.join(affected)}. Re-run them with "
+            "--resume before treating these numbers as the harness's effect."
+        )
+
     if trials_per_cell < 3:
         warnings.append(
             f"only {trials_per_cell} trial(s) per cell — confidence intervals are "
@@ -415,6 +446,11 @@ def analyze(
     max_degradation = min((r.delta for r in non_base), default=0.0)
 
     # Paired, per-task deltas with a task-level bootstrap interval.
+    #
+    # The interval covers the MEAN per-task delta, not the pooled delta in the
+    # table above. They differ whenever tasks do not all have the same pass
+    # rate, and attaching a mean-of-tasks interval to a pooled point estimate
+    # would be a category error. The renderer labels the column accordingly.
     paired = paired_deltas(results, baseline)
     paired_ci: dict[str, tuple[float, float]] = {}
     for harness, deltas in paired.items():
@@ -647,6 +683,11 @@ def render_diagnosis(report: Report) -> str:
     return "\n".join(lines)
 
 
+def _fmt_pct(value: float | None) -> str:
+    """Render a rate, distinguishing 'no data' from 'measured zero'."""
+    return "n/a" if value is None else f"{value:.1%}"
+
+
 def render_markdown(report: Report) -> str:
     lines = [
         f"# HarnessProbe report — `{report.model}`",
@@ -675,10 +716,14 @@ def render_markdown(report: Report) -> str:
             "properties of the model."
         ),
         "",
-        "| harness | pass rate | delta vs baseline | 95% CI | paired delta (task-level bootstrap) | tokens | token delta | steps |",
+        (
+            "| harness | pass rate | delta vs baseline (pooled) | 95% CI | "
+            "mean paired delta (task-level bootstrap CI) | tokens | "
+            "token delta | steps |"
+        ),
         "|---|---:|---:|---|---|---:|---:|---:|",
     ]
-    for row in sorted(report.rows, key=lambda r: -r.pass_rate):
+    for row in sorted(report.rows, key=lambda r: -(r.pass_rate or 0.0)):
         # ASCII only: reports get printed to Windows consoles with a GBK codepage.
         mark = " (baseline)" if row.harness == report.baseline else ""
         lo, hi = report.paired_ci.get(row.harness, (0.0, 0.0))
@@ -687,7 +732,7 @@ def render_markdown(report: Report) -> str:
         else:
             ci_text = f"{row.delta:+.1%} (n/a: <2 tasks)"
         lines.append(
-            f"| `{row.harness}`{mark} | {row.pass_rate:.1%} | {row.delta:+.1%} | "
+            f"| `{row.harness}`{mark} | {_fmt_pct(row.pass_rate)} | {row.delta:+.1%} | "
             f"[{row.ci_low:.0%}, {row.ci_high:.0%}] | {ci_text} | {row.mean_tokens:.0f} | "
             f"{row.token_delta_pct:+.1f}% | {row.mean_steps:.1f} |"
         )
