@@ -27,3 +27,7 @@ Thumbs.db
 build/
 dist/
 *.egg-info/
+
+# Scratch files from review agents; never commit these.
+.esc_poc.py
+*.poc.py
