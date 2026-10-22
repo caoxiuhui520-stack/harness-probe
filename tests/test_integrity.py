@@ -137,3 +137,44 @@ def test_staged_tests_are_read_only_but_the_sandbox_is_removable(tmp_path):
 
     _remove_tree(sandbox)
     assert not sandbox.exists()
+
+
+# -- tool schema coverage ---------------------------------------------------
+
+
+def test_tool_schema_fingerprint_is_stable():
+    from harnessprobe.cli import tool_schema_fingerprint
+
+    assert tool_schema_fingerprint() == tool_schema_fingerprint()
+
+
+def test_tool_schema_fingerprint_changes_when_a_description_changes(monkeypatch):
+    """Editing a tool description must invalidate a resume.
+
+    The tool definitions live in code, not in the harness config, so without
+    this a run resumed across a description edit would mix trials produced
+    under two different tool contracts.
+    """
+    from harnessprobe import tools
+    from harnessprobe.cli import tool_schema_fingerprint
+
+    before = tool_schema_fingerprint()
+    original = tools._DESCRIPTIONS["read_file"]["full"]
+    monkeypatch.setitem(
+        tools._DESCRIPTIONS["read_file"], "full", original + " (edited)"
+    )
+    assert tool_schema_fingerprint() != before
+
+
+def test_experiment_fingerprint_changes_with_the_tool_schemas():
+    from harnessprobe.cli import experiment_fingerprint
+
+    tasks = _tasks()
+    harnesses, baseline = _harnesses()
+    a = experiment_fingerprint(
+        tasks, harnesses, baseline, 1, model="m", tool_schemas_hash="hash-a"
+    )
+    b = experiment_fingerprint(
+        tasks, harnesses, baseline, 1, model="m", tool_schemas_hash="hash-b"
+    )
+    assert a != b

@@ -90,6 +90,7 @@ def experiment_fingerprint(
     provider: str = "",
     model: str = "",
     max_tokens: int = 0,
+    tool_schemas_hash: str = "",
 ) -> str:
     """Hash everything a resumed run must match to reuse its earlier trials.
 
@@ -123,10 +124,39 @@ def experiment_fingerprint(
             "provider": provider,
             "model": model,
             "max_tokens": max_tokens,
+            # The tool schemas and descriptions live in code, not in the config,
+            # so editing them does not change any field above. Hashing the
+            # package version is a coarse guard: it catches a deliberate bump
+            # but not an un-released edit. It is better than nothing, and the
+            # alternative — hashing the tool definitions themselves — couples
+            # the fingerprint to the implementation it is meant to abstract over.
+            "harnessprobe_version": __version__,
+            "tool_schemas_hash": tool_schemas_hash,
         },
         sort_keys=True,
         ensure_ascii=False,
     ).encode()
+    return hashlib.sha256(blob).hexdigest()[:16]
+
+
+def tool_schema_fingerprint() -> str:
+    """Hash the tool definitions the agent actually sees.
+
+    The tool names, descriptions and input schemas live in code, not in the
+    harness config, so editing one does not change any field the experiment
+    fingerprint covers. A run resumed across such an edit would mix trials
+    produced under two different tool contracts.
+
+    Hashing the rendered definitions makes that visible. The hash is taken over
+    the full set at the most verbose style, so a change to any description in
+    any style is caught.
+    """
+    import hashlib
+
+    from .tools import ALL_TOOLS, build_tool_specs
+
+    specs = build_tool_specs(list(ALL_TOOLS), "full")
+    blob = json.dumps(specs, sort_keys=True, ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()[:16]
 
 
@@ -158,6 +188,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         provider=args.provider,
         model=args.model,
         max_tokens=args.max_tokens,
+        tool_schemas_hash=tool_schema_fingerprint(),
     )
 
     # Capture the previous manifest's fingerprint BEFORE overwriting it, so a
