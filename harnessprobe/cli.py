@@ -10,6 +10,7 @@ import threading
 import time
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 from . import __version__
 from .analysis import analyze, render_markdown, render_per_task
@@ -339,6 +340,41 @@ def cmd_inspect(args: argparse.Namespace) -> int:
     return 0
 
 
+def _load_run(run_path: Path) -> tuple[list[TrialResult], dict[str, Any]]:
+    """Read a run directory, rebuilding results from traces if necessary.
+
+    A run interrupted before it wrote results.json still has traces.jsonl —
+    one line per completed trial, appended as it ran. Rebuilding from it means
+    an interrupted run is analysable instead of being lost work, and it is the
+    same data source --resume uses, so the two cannot disagree.
+    """
+    run_path = Path(run_path)
+    manifest_path = run_path / "manifest.json"
+    results_path = run_path / "results.json"
+    trace_path = run_path / "traces.jsonl"
+
+    if not manifest_path.exists():
+        raise SpecError(f"{run_path} is not a run directory (no manifest.json)")
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    if results_path.exists():
+        rows = [
+            TrialResult.from_dict(dict(r))
+            for r in json.loads(results_path.read_text(encoding="utf-8"))
+        ]
+        return rows, manifest
+
+    if not trace_path.exists():
+        raise SpecError(f"{run_path} has no results.json or traces.jsonl")
+
+    rows = []
+    for line in trace_path.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            rows.append(TrialResult.from_dict(json.loads(line)))
+    return rows, manifest
+
+
 def cmd_compare(args: argparse.Namespace) -> int:
     """Compare several completed runs side by side.
 
@@ -349,23 +385,19 @@ def cmd_compare(args: argparse.Namespace) -> int:
     reports = []
     for run_path in args.runs:
         run_dir = Path(run_path)
-        results_path = run_dir / "results.json"
-        manifest_path = run_dir / "manifest.json"
-        if not results_path.exists() or not manifest_path.exists():
-            print(f"error: {run_dir} is not a run directory", file=sys.stderr)
+        try:
+            results, manifest = _load_run(run_dir)
+        except (SpecError, json.JSONDecodeError, OSError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
             return 2
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        results = [
-            TrialResult.from_dict(dict(r))
-            for r in json.loads(results_path.read_text(encoding="utf-8"))
-        ]
-        report = analyze(
-            results,
-            model=manifest.get("model", str(run_dir)),
-            baseline=manifest.get("baseline", "baseline"),
-            k=args.k,
+        reports.append(
+            analyze(
+                results,
+                model=manifest.get("model", str(run_dir)),
+                baseline=manifest.get("baseline", "baseline"),
+                k=args.k,
+            )
         )
-        reports.append(report)
 
     if not reports:
         print("error: no runs to compare", file=sys.stderr)
@@ -377,13 +409,15 @@ def cmd_compare(args: argparse.Namespace) -> int:
     print("model's measured score is mostly a property of its harness.")
     print()
     print(
-        "| model | tasks | trials | pass rate | HSI | most helped by | most hurt by |"
+        "| model | tasks | trials | pass rate | HSI | max degradation | "
+        "largest drop under | largest gain under |"
     )
-    print("|---|---:|---:|---:|---:|---|---|")
+    print("|---|---:|---:|---:|---:|---:|---|---|")
     for r in sorted(reports, key=lambda x: -x.hsi):
         print(
             f"| `{r.model}` | {r.task_count} | {r.trials_per_cell} | "
             f"{r.overall_pass_rate:.1%} | {r.hsi:.1%} | "
+            f"{r.max_degradation:+.1%} | "
             f"`{r.hsi_worst or '-'}` | `{r.hsi_best or '-'}` |"
         )
 
@@ -410,6 +444,21 @@ def cmd_compare(args: argparse.Namespace) -> int:
         for r in reports:
             for w in r.warnings:
                 print(f"- `{r.model}`: {w}")
+
+    # Runs that do not cover the same tasks are not comparable, and the table
+    # above would imply they are. Compare the per-task coverage, not the
+    # aggregate, because that is what a reader would otherwise assume matched.
+    coverage = {
+        r.model: {task for row in r.rows for task in row.per_task} for r in reports
+    }
+    if len({frozenset(v) for v in coverage.values()}) > 1:
+        print()
+        print("**Warning: these runs do not cover the same tasks.** The table")
+        print("above compares aggregates across different task sets, which is not")
+        print("a valid comparison. Re-run the missing tasks with `--resume` before")
+        print("drawing any conclusion.")
+        for model, tasks in sorted(coverage.items()):
+            print(f"- `{model}`: {len(tasks)} task(s)")
     return 0
 
 
