@@ -5,6 +5,85 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+
+
+All notable changes to this project are documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
+adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.3.1] - 2026-10-22
+
+Correctness and safety fixes found by an adversarial review of v0.3.0. Every
+finding was reproduced against the code before being fixed.
+
+### Fixed
+
+- **Zero-width bootstrap confidence intervals.** The task-level bootstrap used
+  a hand-rolled LCG whose first `n` outputs were a permutation of `0..n-1`
+  whenever `n` was a power of two, so all 2000 resamples were the same
+  multiset reordered and every mean was identical. The interval collapsed to
+  zero width at n = 2, 4, 8, 16 and 32. Replaced with `random.Random` seeded
+  from the data. Widths now converge as expected (0.333 at n=4 to 0.115 at
+  n=32) and match a numpy reference.
+- **A provider outage was reported as a harness effect.** A trial that died on
+  a provider error has `passed=False`, which was counted as a failure, so a run
+  cut short mid-matrix showed the affected harness down 100%. Errored trials
+  are now excluded from every rate and reported separately; a cell whose every
+  trial errored renders `n/a` rather than `0%`.
+- **Duplicate trial records inflated the denominator.** `traces.jsonl` is
+  append-only, so a trial that errored and was re-run with `--resume` appears
+  twice. `analyze` now collapses duplicates and says how many.
+- **`keep_last_n` never inherited.** It had a concrete default of 6, so
+  `merged()` saw a non-None value on every child and skipped inheritance: a
+  baseline running `keep_last_n=3` produced children silently running 6 — a
+  different experiment attributed to whichever knob the child claimed to
+  change.
+- **`temperature` above 1.0 was silently clamped** by the Anthropic adapter.
+  The matrix declared one value and the run measured another. Validation now
+  rejects it.
+- **`Sandbox.search()` could escape the sandbox.** The glob went straight to
+  `Path.rglob`, which treats it as a path pattern, so `glob="../*"` returned
+  the host's files as search hits. The glob is now validated as a single
+  filename pattern and every candidate is checked to resolve inside the
+  sandbox.
+- **The graders inherited the host environment**, handing the provider's API
+  key to whatever the task's test suite does — defeating the credential filter
+  applied to the agent's own shell. Both graders now use the sandbox's
+  environment policy.
+- **An unknown tool name aborted the whole matrix** from inside the agent loop,
+  leaving no traces and no report. Tool names are validated when the matrix
+  loads, and any other setup failure inside `run_trial` now fails that trial
+  instead of the run.
+- **Read-only sandboxes were never deleted.** `_stage_tests` chmods the staged
+  tests to `0o444` and `shutil.rmtree` cannot unlink a read-only file on
+  Windows, so cleanup failed silently and sandboxes accumulated across runs.
+- **`--resume` did not cover the provider, model, token ceiling or tool
+  contract.** Running half a matrix on model A and resuming with model B reused
+  A's trials and reported them under B's name. All four are now hashed into the
+  experiment fingerprint.
+
+### Changed
+
+- `grade` renamed to `analyze`. It never re-graded — it recomputed statistics —
+  and its docstring claimed otherwise. `analyze --out` rewrites the report.
+- `inspect` skips a corrupt trace line instead of crashing and losing every
+  trace after it.
+- `compare` warns when a single run is itself incomplete, not only when two
+  runs disagree.
+- The delta column is labelled `pooled`, and the bootstrap column `mean paired
+  delta`. They are different quantities and the header now says which is which.
+- The report states that HSI is a measurement under a given task set, matrix
+  and budget, not a property of the model. The HSI tier table is a reading aid,
+  not a calibrated scale, and the tool-description-brittleness claim is
+  documented as a hypothesis.
+- Corrected the claim that the read-only test staging "fails loudly". It is a
+  speed bump: the agent has a shell and can `chmod` the file back. Grading is
+  unaffected; the trace shows it.
+- `_stage_tests` warns when a task ships its own `tests/` directory, where
+  staging silently no-ops.
+
+[0.3.1]: https://github.com/caoxiuhui520-stack/harness-probe/compare/v0.3.0...v0.3.1
+
 ## [0.3.0] - 2026-10-22
 
 Turns a measurement into a lead: which knob is responsible, and what
