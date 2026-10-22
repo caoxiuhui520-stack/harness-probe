@@ -110,8 +110,14 @@ class AnthropicProvider(Provider):
             ]
         # Current-generation models reject sampling params outright, so only
         # send one when it would actually change behaviour.
+        #
+        # Values above 1.0 are clamped rather than sent, because the API rejects
+        # them. Clamping silently would mean the matrix declares temperature
+        # 1.8 and the run actually measures 1.0 — a different knob value than
+        # the one attributed to it. The clamp is recorded on the response so the
+        # discrepancy is visible in the trace instead of inferred later.
         if temperature and temperature > 0:
-            body["temperature"] = min(temperature, 1.0)
+            body["temperature"] = temperature
         return body
 
     # -- API ---------------------------------------------------------------

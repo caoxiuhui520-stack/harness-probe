@@ -85,7 +85,7 @@ def apply_history_policy(messages: list[Message], cfg: HarnessConfig) -> list[Me
     if policy == "keep_last_n":
         # Hard window over *turns*, always keeping the original user message so
         # the model never loses the task statement.
-        n = max(1, cfg.keep_last_n)
+        n = max(1, cfg.effective_keep_last_n)
         if len(messages) <= n + 1:
             return messages
         head = messages[:1]

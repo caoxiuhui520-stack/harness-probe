@@ -129,3 +129,40 @@ def test_trial_result_round_trips():
     assert again.passed and again.task_id == "t"
     assert again.steps[0].text == "hi"
     assert again.total_tokens == 15
+
+
+# -- knob inheritance and validation ----------------------------------------
+
+
+def test_keep_last_n_inherits_from_the_baseline():
+    """A concrete default made every child look like it had set the knob.
+
+    With `keep_last_n: int = 6`, merged() saw a non-None value and skipped
+    inheritance, so a baseline running keep_last_n=3 silently produced children
+    running keep_last_n=6 — a different window size, and therefore a different
+    experiment, attributed to whatever knob the child claimed to change.
+    """
+    base = HarnessConfig(name="base", history_policy="keep_last_n", keep_last_n=3)
+    child = HarnessConfig(name="child", max_steps=8).merged(base)
+    assert child.keep_last_n == 3
+
+
+def test_keep_last_n_defaults_to_six_when_never_set():
+    assert HarnessConfig().effective_keep_last_n == 6
+
+
+def test_child_can_still_override_keep_last_n():
+    base = HarnessConfig(name="base", history_policy="keep_last_n", keep_last_n=3)
+    child = HarnessConfig(name="child", keep_last_n=12).merged(base)
+    assert child.keep_last_n == 12
+
+
+def test_temperature_above_one_is_rejected():
+    """The provider would clamp it, so the run would measure a different value."""
+    with pytest.raises(SpecError, match="1.0 maximum"):
+        HarnessConfig.from_dict({"temperature": 1.8}).validate()
+
+
+def test_temperature_at_or_below_one_is_accepted():
+    for value in (0.0, 0.5, 1.0):
+        HarnessConfig.from_dict({"temperature": value}).validate()

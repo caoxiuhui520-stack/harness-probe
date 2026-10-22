@@ -143,6 +143,10 @@ HARNESS_KNOBS = (
     "history_policy",
     "retry_on_error",
     "reasoning_hint",
+    # keep_last_n changes behaviour whenever history_policy is keep_last_n, so
+    # it belongs here: omitting it meant a child harness silently ran the
+    # default 6 instead of inheriting the baseline's value.
+    "keep_last_n",
 )
 
 HISTORY_POLICIES = ("full", "drop_old_tool_results", "keep_last_n")
@@ -167,19 +171,32 @@ class HarnessConfig:
     history_policy: str | None = None
     retry_on_error: bool | None = None
     reasoning_hint: bool | None = None
-    # keep_last_n only
-    keep_last_n: int = 6
+    # keep_last_n only. None means "not set" so it inherits from the baseline;
+    # a numeric default here would make merged() treat every child as having
+    # set it, and a baseline's value would never propagate.
+    keep_last_n: int | None = None
     # extra free-form metadata that ends up in the report
     notes: str = ""
 
     def merged(self, base: HarnessConfig) -> HarnessConfig:
-        """Return a copy where unset knobs are taken from ``base``."""
+        """Return a copy where unset knobs are taken from ``base``.
+
+        Every knob must default to None for this to mean anything: a field with
+        a concrete default looks "set" to the check below and blocks
+        inheritance. `keep_last_n` was exactly that bug — a baseline value never
+        reached its children, which silently ran a different window size.
+        """
         out = HarnessConfig(**asdict(self))
         for knob in HARNESS_KNOBS:
             if getattr(out, knob) is None:
                 setattr(out, knob, getattr(base, knob))
         out.name = self.name or base.name
         return out
+
+    @property
+    def effective_keep_last_n(self) -> int:
+        """The window size actually used, with the default applied once."""
+        return 6 if self.keep_last_n is None else self.keep_last_n
 
     def validate(self) -> None:
         if self.history_policy and self.history_policy not in HISTORY_POLICIES:
@@ -198,6 +215,16 @@ class HarnessConfig:
             raise SpecError("max_steps must be >= 1")
         if self.temperature is not None and not (0.0 <= self.temperature <= 2.0):
             raise SpecError("temperature must be within [0, 2]")
+        if self.temperature is not None and self.temperature > 1.0:
+            # The Anthropic Messages API rejects temperature above 1.0. Letting
+            # it through means the provider clamps it, and the run then measures
+            # a value other than the one the matrix declares.
+            raise SpecError(
+                f"temperature {self.temperature} exceeds the 1.0 maximum the "
+                "Anthropic Messages API accepts; the provider would clamp it "
+                "and the run would measure a different value than the matrix "
+                "declares"
+            )
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> HarnessConfig:
