@@ -311,6 +311,23 @@ def _resample(values: list[float], iterations: int) -> list[float]:
     return means
 
 
+def deduplicate(results: list[TrialResult]) -> tuple[list[TrialResult], int]:
+    """Collapse repeated (task, harness, trial) records, keeping the last.
+
+    traces.jsonl is append-only, so a trial that errored and was later re-run
+    with --resume appears twice. The errored record is dropped by the error
+    filter, but two *successful* records for the same trial would both survive
+    and inflate the denominator — quietly biasing every rate and mean.
+
+    Keeping the last record is the right rule: it is the most recent attempt at
+    that trial.
+    """
+    seen: dict[tuple[str, str, int], TrialResult] = {}
+    for r in results:
+        seen[(r.task_id, r.harness, r.trial)] = r
+    return list(seen.values()), len(results) - len(seen)
+
+
 def analyze(
     results: list[TrialResult],
     *,
@@ -319,6 +336,7 @@ def analyze(
     harness_knobs: dict[str, dict[str, Any]] | None = None,
     k: int = 1,
 ) -> Report:
+    results, duplicates = deduplicate(results)
     cells = aggregate(results)
     if not cells:
         return Report(model=model, baseline=baseline, trials_per_cell=0)
@@ -413,6 +431,14 @@ def analyze(
     # Trials that died before producing a measurement are excluded from every
     # rate. Silently dropping them would let an outage look like a clean run,
     # so the count is stated rather than implied.
+    if duplicates:
+        warnings.append(
+            f"{duplicates} duplicate trial record(s) were collapsed "
+            "(the same task/harness/trial appears more than once — usually a "
+            "trial that errored and was re-run with --resume). The last record "
+            "for each was kept."
+        )
+
     total_errored = sum(c.errored for c in cells.values())
     if total_errored:
         affected = sorted(

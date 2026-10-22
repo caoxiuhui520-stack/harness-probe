@@ -199,6 +199,21 @@ class HarnessConfig:
         return 6 if self.keep_last_n is None else self.keep_last_n
 
     def validate(self) -> None:
+        # Reject unknown tool names here rather than letting them surface as a
+        # ToolError from inside the agent loop. A typo in a matrix file should
+        # stop the run before it spends anything, with a message naming the
+        # harness and the bad tool — not abort the whole matrix mid-flight with
+        # no traces and no report.
+        if self.tool_set is not None:
+            from .tools import ALL_TOOLS
+
+            unknown = [t for t in self.tool_set if t not in ALL_TOOLS]
+            if unknown:
+                raise SpecError(
+                    f"harness {self.name!r} lists unknown tool(s) {unknown}; "
+                    f"available: {list(ALL_TOOLS)}"
+                )
+
         if self.history_policy and self.history_policy not in HISTORY_POLICIES:
             raise SpecError(
                 f"history_policy {self.history_policy!r} not in {HISTORY_POLICIES}"

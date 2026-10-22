@@ -484,9 +484,9 @@ def test_an_all_errored_cell_has_no_pass_rate_rather_than_zero():
 
 def test_partially_errored_cell_uses_only_valid_trials():
     results = [
-        trial("t1", "base", True),
+        trial("t1", "base", True, trial=0),
         errored("t1", "alt"),
-        trial("t1", "alt", False),
+        trial("t1", "alt", False, trial=1),
     ]
     report = analyze(results, model="m", baseline="base")
     row = next(r for r in report.rows if r.harness == "alt")
@@ -551,3 +551,39 @@ def test_report_labels_pooled_and_paired_differently():
     md = render_markdown(report)
     assert "pooled" in md
     assert "mean paired delta" in md
+
+
+# -- duplicate trial records -----------------------------------------------
+
+
+def test_duplicate_trial_records_are_collapsed():
+    """traces.jsonl is append-only, so a re-run trial appears twice."""
+    rows = [trial("t1", "base", True), trial("t1", "base", True)]
+    report = analyze(rows, model="m", baseline="base")
+    assert report.rows[0].n == 1
+    assert any("duplicate" in w for w in report.warnings)
+
+
+def test_duplicate_collapse_keeps_the_last_record():
+    """The most recent attempt at a trial is the one that counts."""
+    rows = [trial("t1", "base", False), trial("t1", "base", True)]
+    report = analyze(rows, model="m", baseline="base")
+    assert report.rows[0].n == 1
+    assert report.rows[0].pass_rate == pytest.approx(1.0)
+
+
+def test_no_duplicate_warning_when_records_are_distinct():
+    rows = [trial("t1", "base", True, trial=0), trial("t1", "base", True, trial=1)]
+    report = analyze(rows, model="m", baseline="base")
+    assert not any("duplicate" in w for w in report.warnings)
+    assert report.rows[0].n == 2
+
+
+def test_distinct_trials_are_not_collapsed():
+    rows = [
+        trial("t1", "base", True, trial=0),
+        trial("t1", "base", False, trial=1),
+        trial("t2", "base", True, trial=0),
+    ]
+    report = analyze(rows, model="m", baseline="base")
+    assert report.rows[0].n == 3

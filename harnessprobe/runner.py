@@ -114,6 +114,29 @@ class TrialContext:
 
 
 def run_trial(ctx: TrialContext) -> TrialResult:
+    """Run one trial.
+
+    A setup failure — a bad tool name, an unbuildable prompt — returns a
+    TrialResult carrying the error rather than raising. The matrix keeps going
+    and the failure is visible in the trace; raising here would abort every
+    remaining trial and leave a run with no report at all.
+    """
+    task, cfg = ctx.task, ctx.cfg
+    try:
+        return _run_trial(ctx)
+    except Exception as exc:  # setup failure, not a trial outcome
+        return TrialResult(
+            task_id=task.id,
+            harness=cfg.name,
+            model=ctx.provider.model,
+            trial=ctx.trial_index,
+            passed=False,
+            stop_reason="setup_error",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+
+
+def _run_trial(ctx: TrialContext) -> TrialResult:
     task, cfg = ctx.task, ctx.cfg
     sandbox = Sandbox(ctx.sandbox_root, task.readonly)
     executor = make_executor(sandbox)
