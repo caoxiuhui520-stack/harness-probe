@@ -216,3 +216,96 @@ def test_schemas_are_valid_json_schema_objects():
         schema = spec["input_schema"]
         assert schema["type"] == "object"
         assert "properties" in schema
+
+
+# -- search glob must not defeat confinement ---------------------------------
+#
+# The glob goes to Path.rglob, which treats it as a path pattern. Without
+# validation, "../*" walks out of the sandbox and returns the host's files as
+# search hits — a one-parameter bypass of the confinement the file tools enforce.
+
+
+def test_search_rejects_a_parent_traversal_glob(sandbox, tmp_path):
+    (tmp_path / "outside.txt").write_text("needle-outside\n", encoding="utf-8")
+    out = sandbox.search("needle-outside", "../*")
+    assert out.is_error
+    assert "outside.txt" not in out.content
+
+
+@pytest.mark.parametrize("bad", ["/etc/*", "C:/Windows/*", "..", "../**/*"])
+def test_search_rejects_escaping_globs(sandbox, bad):
+    out = sandbox.search("anything", bad)
+    assert out.is_error, f"glob {bad!r} was accepted"
+
+
+def test_search_still_accepts_a_filename_pattern(sandbox):
+    out = sandbox.search("return 42", "*.py")
+    assert not out.is_error
+    assert "nested.py" in out.content
+
+
+def test_search_without_a_glob_still_works(sandbox):
+    out = sandbox.search("line one")
+    assert not out.is_error
+    assert "hello.txt" in out.content
+
+
+# -- graders must use the same environment policy ---------------------------
+
+
+def test_grader_subprocess_does_not_inherit_credentials(tmp_path, monkeypatch):
+    """A grader runs the task's own code, so it must not see the API key."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-must-not-leak")
+    from harnessprobe.graders import grade
+    from harnessprobe.spec import Step, Task, TrialResult
+
+    task = Task.from_dict(
+        {
+            "id": "env-probe",
+            "prompt": "p",
+            "grader": {"type": "exit_code", "options": {"command": "env"}},
+        },
+        root=tmp_path,
+    )
+    result = TrialResult(
+        task_id=task.id,
+        harness="h",
+        model="m",
+        trial=0,
+        passed=False,
+        steps=[Step(index=0, kind="assistant")],
+    )
+    graded = grade(task, result, tmp_path)
+
+    assert "sk-ant-must-not-leak" not in graded.grader_output
+    assert "ANTHROPIC_API_KEY" not in graded.grader_output
+
+
+def test_grader_pytest_still_runs_with_the_filtered_env(tmp_path):
+    """The filter must not break grading: pytest needs PATH and a python."""
+
+    from harnessprobe.graders import grade
+    from harnessprobe.spec import Step, Task, TrialResult
+
+    task_dir = tmp_path / "task"
+    (task_dir / "workspace").mkdir(parents=True)
+    (task_dir / "tests").mkdir()
+    (task_dir / "tests" / "test_ok.py").write_text(
+        "def test_ok():\n    assert True\n", encoding="utf-8"
+    )
+    (task_dir / "task.json").write_text(
+        '{"id":"t","prompt":"p","grader":{"type":"pytest","target":"tests"}}',
+        encoding="utf-8",
+    )
+    task = Task.load(task_dir)
+
+    result = TrialResult(
+        task_id=task.id,
+        harness="h",
+        model="m",
+        trial=0,
+        passed=False,
+        steps=[Step(index=0, kind="assistant")],
+    )
+    graded = grade(task, result, task_dir / "workspace")
+    assert graded.passed, graded.grader_output[:400]

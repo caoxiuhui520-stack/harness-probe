@@ -368,8 +368,32 @@ class Sandbox:
             rx = re.compile(pattern)
         except re.error as exc:
             return ToolResult(f"error: bad regex: {exc}", is_error=True)
+        # The glob goes to rglob, which treats it as a path pattern. A value
+        # like "../*" or "/etc/*" walks straight out of the sandbox and returns
+        # the host's files as search hits, defeating the confinement the file
+        # tools enforce. Validate it the same way: no separators, no drive
+        # letters, no parent references.
+        if glob and (
+            os.path.isabs(glob)
+            or re.match(r"^[A-Za-z]:", glob)
+            or "/" in glob
+            or "\\" in glob
+            or ".." in glob
+        ):
+            return ToolResult(
+                f"error: glob must be a single filename pattern, got {glob!r}",
+                is_error=True,
+            )
         hits: list[str] = []
         for path in sorted(self.root.rglob(glob or "*")):
+            # Belt and braces: rglob can still follow a symlink out of the
+            # sandbox, so confirm every candidate resolves inside it.
+            try:
+                resolved = path.resolve()
+            except OSError:
+                continue
+            if resolved != self.root and self.root not in resolved.parents:
+                continue
             if not path.is_file():
                 continue
             rel = path.relative_to(self.root).as_posix()

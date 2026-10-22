@@ -9,7 +9,6 @@ and a transcript-based grader rewards confident wording.
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
 import sys
@@ -17,6 +16,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..spec import GraderSpec, Task, TrialResult
+from ..tools import Sandbox
 
 GRADER_VERSION = "1"
 
@@ -59,7 +59,12 @@ def _pytest(task: Task, spec: GraderSpec, sandbox: Path) -> GradeResult:
         return GradeResult(False, 0.0, f"test path not found: {tests}")
     tests = tests.resolve()
 
-    env = dict(os.environ)
+    # Reuse the sandbox's environment policy rather than the host's. Inheriting
+    # os.environ here would hand the provider's API key to whatever the task's
+    # test suite does, which defeats the whole point of filtering it out of the
+    # agent's shell. The grader runs the task's own code, so it is at least as
+    # untrusted as the agent is.
+    env = Sandbox(sandbox).command_env()
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     cmd = [
         sys.executable,
@@ -157,6 +162,10 @@ def _exit_code(task: Task, spec: GraderSpec, sandbox: Path) -> GradeResult:
     command = spec.options.get("command", "")
     if not command:
         return GradeResult(False, 0.0, "exit_code grader needs options.command")
+    # Same environment policy as every other subprocess: the command comes from
+    # the task definition, which is at least as untrusted as the agent.
+    env = Sandbox(sandbox).command_env()
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     try:
         proc = subprocess.run(
             command,
@@ -166,6 +175,7 @@ def _exit_code(task: Task, spec: GraderSpec, sandbox: Path) -> GradeResult:
             capture_output=True,
             text=True,
             timeout=spec.timeout,
+            env=env,
             errors="replace",
         )
     except subprocess.TimeoutExpired:
