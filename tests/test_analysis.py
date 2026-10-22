@@ -10,6 +10,7 @@ from harnessprobe.analysis import (
     pass_pow_k,
     render_diagnosis,
     render_markdown,
+    task_level_bootstrap_ci,
     wilson_interval,
 )
 from harnessprobe.spec import TrialResult
@@ -387,3 +388,55 @@ def test_render_diagnosis_labels_itself_as_hypothetical():
     text = render_diagnosis(report)
     assert "hypotheses, not conclusions" in text
     assert "Hypothesis" in text
+
+
+# -- bootstrap resampling must actually resample -----------------------------
+
+
+@pytest.mark.parametrize("n", [2, 4, 8, 16, 32])
+def test_bootstrap_interval_is_not_degenerate_at_power_of_two_n(n):
+    """A zero-width CI at 2^k tasks was a real bug.
+
+    The previous LCG (a=1103515245, c=12345) produced a permutation of
+    0..n-1 as its first n outputs when n was a power of two, so all 2000
+    resamples were the same multiset reordered and every mean was identical.
+    The interval collapsed to zero width, which reads as a very precise
+    measurement rather than as a broken one.
+    """
+    deltas = {f"t{i}": (-0.333 if i % 2 == 0 else 0.0) for i in range(n)}
+    lo, hi = task_level_bootstrap_ci(deltas)
+    assert hi > lo, f"n={n}: degenerate interval [{lo}, {hi}]"
+
+
+def test_bootstrap_interval_narrows_as_tasks_increase():
+    """Sanity: more independent units must mean a tighter interval."""
+    widths = []
+    for n in (4, 8, 16, 32):
+        deltas = {f"t{i}": (-0.333 if i % 2 == 0 else 0.0) for i in range(n)}
+        lo, hi = task_level_bootstrap_ci(deltas)
+        widths.append(hi - lo)
+    assert widths == sorted(widths, reverse=True), widths
+
+
+def test_bootstrap_produces_more_than_one_distinct_mean():
+    """Direct check that resampling varies, not just that the CI is wide."""
+    from harnessprobe.analysis import _resample
+
+    values = [-0.3, 0.0, -0.3, 0.1, -0.2]
+    means = _resample(values, 200)
+    assert len(set(means)) > 10, f"only {len(set(means))} distinct resamples"
+
+
+def test_bootstrap_is_reproducible_for_identical_input():
+    from harnessprobe.analysis import _resample
+
+    values = [-0.3, 0.0, -0.3, 0.1, -0.2]
+    assert _resample(values, 200) == _resample(values, 200)
+
+
+def test_bootstrap_differs_for_different_input():
+    from harnessprobe.analysis import _resample
+
+    a = _resample([-0.3, 0.0, -0.3], 100)
+    b = _resample([-0.3, 0.0, -0.31], 100)
+    assert a != b

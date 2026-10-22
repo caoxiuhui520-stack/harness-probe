@@ -26,6 +26,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import random
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -263,32 +264,40 @@ def task_level_bootstrap_ci(
         return (values[0], values[0])
     # Deterministic pseudo-sampling: seed from the data itself so the same
     # deltas always produce the same interval (reports must be reproducible).
-    rng = _DeterministicRandom(values, n)
-    means: list[float] = []
-    for _ in range(iterations):
-        sample = [values[rng.next_index()] for _ in range(n)]
-        means.append(sum(sample) / n)
-    means.sort()
+    means = sorted(_resample(values, iterations))
     lo = means[int((alpha / 2) * iterations)]
     hi = means[min(iterations - 1, int((1 - alpha / 2) * iterations))]
     return (lo, hi)
 
 
-class _DeterministicRandom:
-    """A tiny LCG. Enough for bootstrap resampling, and reproducible."""
+def _resample(values: list[float], iterations: int) -> list[float]:
+    """Bootstrap means, seeded from the data so the result is reproducible.
 
-    def __init__(self, seed_values: list[float], modulus: int) -> None:
-        # hash() is salted per process, so derive the seed from the values
-        # themselves — a report must be byte-identical when re-run.
-        digest = hashlib.sha256(
-            json.dumps(seed_values, sort_keys=True).encode("utf-8")
-        ).digest()
-        self.state = int.from_bytes(digest[:4], "big") or 1
-        self.modulus = max(1, modulus)
+    Uses `random.Random(seed)` rather than a hand-rolled LCG. An earlier LCG
+    (a = 1103515245, c = 12345) had the property that for any power-of-two
+    sample size its first n outputs were a permutation of 0..n-1, so all 2000
+    resamples were the same multiset reordered and every mean was identical.
+    The interval collapsed to zero width — which is worse than a wrong interval,
+    because a zero-width CI reads as a very precise measurement.
 
-    def next_index(self) -> int:
-        self.state = (1103515245 * self.state + 12345) & 0x7FFFFFFF
-        return self.state % self.modulus
+    Seeding from the values themselves (not `hash()`, which is salted per
+    process) keeps a report byte-identical when re-run on the same data.
+    """
+    if not values:
+        return []
+    seed = int.from_bytes(
+        hashlib.sha256(json.dumps(values, sort_keys=True).encode("utf-8")).digest()[:8],
+        "big",
+    )
+    rng = random.Random(seed)
+    n = len(values)
+    means = []
+    for _ in range(iterations):
+        total = 0.0
+        for _ in range(n):
+            total += values[rng.randrange(n)]
+        means.append(total / n)
+    return means
 
 
 def analyze(
