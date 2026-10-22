@@ -306,8 +306,25 @@ def _run_one(
             result = job.grade(task, result, sandbox_root)
     finally:
         if not job.keep_sandboxes and sandbox_root.exists():
-            shutil.rmtree(sandbox_root, ignore_errors=True)
+            _remove_tree(sandbox_root)
     return result
+
+
+def _remove_tree(root: Path) -> None:
+    """Delete a sandbox, including the read-only files staged into it.
+
+    Windows refuses to unlink a read-only file, so `rmtree` leaves them behind
+    and the sandbox directory accumulates across runs — which also means the
+    staged tests stay readable on disk after the trial is over. Clearing the
+    read-only bit before deleting is what makes cleanup actually happen.
+    """
+    for path in root.rglob("*"):
+        try:
+            if path.is_file() and not (path.stat().st_mode & 0o200):
+                path.chmod(0o600)
+        except OSError:
+            pass
+    shutil.rmtree(root, ignore_errors=True)
 
 
 def run_matrix(

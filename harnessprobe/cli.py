@@ -82,16 +82,28 @@ def load_harnesses(path: str) -> tuple[list[HarnessConfig], str]:
 
 
 def experiment_fingerprint(
-    tasks: list[Task], harnesses: list[HarnessConfig], baseline: str, trials: int
+    tasks: list[Task],
+    harnesses: list[HarnessConfig],
+    baseline: str,
+    trials: int,
+    *,
+    provider: str = "",
+    model: str = "",
+    max_tokens: int = 0,
 ) -> str:
     """Hash everything a resumed run must match to reuse its earlier trials.
 
     Resuming reads trials recorded by a previous invocation and treats them as
-    results of *this* experiment. If the task set, a prompt, a harness knob or
-    the trial count changed in between, those cached trials describe a
-    different experiment — and a report assembled from both would look complete
+    results of *this* experiment. If anything that changes what a trial measures
+    differs — the task set, a prompt, a harness knob, the trial count, the
+    provider, the model, or the token ceiling — those cached trials describe a
+    different experiment, and a report assembled from both would look complete
     while measuring something else. Comparing this fingerprint before reusing
     anything turns that into a refusal instead.
+
+    The provider and model are in here because omitting them lets a resume
+    attribute one model's trials to another: run half the matrix on model A,
+    resume with model B, and the report is headed with B's name over A's data.
     """
     blob = json.dumps(
         {
@@ -108,6 +120,9 @@ def experiment_fingerprint(
             "harnesses": [h.to_dict() for h in harnesses],
             "baseline": baseline,
             "trials": trials,
+            "provider": provider,
+            "model": model,
+            "max_tokens": max_tokens,
         },
         sort_keys=True,
         ensure_ascii=False,
@@ -135,7 +150,15 @@ def cmd_run(args: argparse.Namespace) -> int:
     run_dir = Path(args.out) / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    fingerprint = experiment_fingerprint(tasks, harnesses, baseline_name, args.trials)
+    fingerprint = experiment_fingerprint(
+        tasks,
+        harnesses,
+        baseline_name,
+        args.trials,
+        provider=args.provider,
+        model=args.model,
+        max_tokens=args.max_tokens,
+    )
 
     # Capture the previous manifest's fingerprint BEFORE overwriting it, so a
     # resume can tell whether the cached trials came from this same experiment.
@@ -470,6 +493,35 @@ def cmd_compare(args: argparse.Namespace) -> int:
         print("drawing any conclusion.")
         for model, tasks in sorted(coverage.items()):
             print(f"- `{model}`: {len(tasks)} task(s)")
+
+    # A single run that is itself incomplete needs saying so too. The manifest
+    # records which task ids the run was *supposed* to cover; fewer in the
+    # results means it stopped early.
+    for run_path, rep in zip(args.runs, reports):
+        manifest_path = Path(run_path) / "manifest.json"
+        if not manifest_path.exists():
+            continue
+        try:
+            intended = set(
+                json.loads(manifest_path.read_text(encoding="utf-8")).get(
+                    "task_ids", []
+                )
+            )
+        except (json.JSONDecodeError, OSError):
+            continue
+        actual = coverage.get(rep.model, set())
+        missing = intended - actual
+        if missing:
+            print()
+            print(
+                f"**Warning: `{rep.model}` covers {len(actual)} of "
+                f"{len(intended)} tasks** ({len(missing)} missing). Its aggregate"
+            )
+            print("numbers do not describe a complete run. Re-run with `--resume`")
+            print("to finish it.")
+            shown = ", ".join(f"`{t}`" for t in sorted(missing)[:6])
+            more = "" if len(missing) <= 6 else f" and {len(missing) - 6} more"
+            print(f"- missing: {shown}{more}")
     return 0
 
 
