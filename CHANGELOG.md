@@ -4,6 +4,44 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+
+## [0.3.0] - 2026-10-22
+
+Turns a measurement into a lead: which knob is responsible, and what
+experiment would confirm it.
+
+### Added
+
+- **Harness sensitivity diagnosis.** Each degraded harness gets an entry
+  naming the knob, a hypothesis, and a confirming experiment. Titled
+  "hypotheses, not conclusions" because a delta shows *that* a configuration
+  is associated with a failure, not *why*.
+- Stop-reason evidence is checked against the signature's prediction. The
+  `tight-budget` signature predicts `max_steps` endings; if trials submitted
+  instead, the entry reports that the evidence does not support it.
+- A harness with no matching signature gets an entry saying so, rather than
+  an invented mechanism.
+- `HarnessRow.stop_reasons` — how trials ended, which separates "ran out of
+  budget" from "could not do it".
+- **Task calibration** (`harnessprobe calibrate tasks`): grades every
+  reference solution and compares the declared difficulty against what the
+  solution's shape implies. Corrected three labels.
+- **Six new tasks** (07-12) covering multi-file defects, constraint-following
+  refactors, spec implementation, retry semantics, under-specified
+  requirements, and bottom-of-chain changes. `11-underspecified` tests a
+  partial spec by asserting only the properties that are actually fixed.
+
+### Fixed
+
+- `compare` carried the inverted worst/best labels fixed in 0.2.0. Now shows
+  max degradation plus the largest drop and gain.
+- `compare` warns when the runs being compared do not cover the same tasks.
+- `compare` reads `traces.jsonl` when `results.json` is absent, so an
+  interrupted run is analysable.
+
+[0.3.0]: https://github.com/caoxiuhui520-stack/harness-probe/compare/v0.2.0...v0.3.0
+
+
 ## [0.2.0] - 2026-10-22
 
 Fixes three measurement defects, one security defect and one integrity defect
@@ -52,6 +90,7 @@ found in a review of 0.1.0. Each was verified against the source before fixing.
   and budget, not a property of the model.
 
 [0.2.0]: https://github.com/caoxiuchui520-stack/harness-probe/compare/v0.1.0...v0.2.0
+
 
 ## [0.1.0] - 2026-10-21
 
@@ -112,5 +151,5 @@ task, run a harness matrix, get a sensitivity report with confidence intervals.
 - Token accounting counts what the provider reports. Providers that omit usage
   on streaming responses will under-report.
 
-[Unreleased]: https://github.com/caoxiuhui520-stack/harness-probe/compare/v0.2.0...HEAD
+[unreleased]: https://github.com/caoxiuhui520-stack/harness-probe/compare/v0.3.0...HEAD
 [0.1.0]: https://github.com/caoxiuhui520-stack/harness-probe/releases/tag/v0.1.0
