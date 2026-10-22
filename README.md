@@ -254,17 +254,41 @@ from the baseline, so a delta is attributable.
 
 ## The bundled tasks
 
-Six tasks, each verified in both directions: the starting workspace fails, and
-a reference solution passes. CI enforces both.
+Twelve tasks, each verified in both directions: the starting workspace fails its
+own suite, and a reference solution passes it. CI enforces both.
 
 | id | what it tests | difficulty |
 |---|---|---|
 | `01-fix-off-by-one` | locate and fix a classic pagination bug | easy |
 | `02-implement-cli-flag` | add a CLI to a library against a test contract | medium |
-| `03-refactor-duplication` | deduplicate under a *structural* constraint | medium |
-| `04-bug-in-parser` | quote-aware parsing; the bug is in the ordering of operations | hard |
+| `03-refactor-duplication` | deduplicate under a *structural* constraint | easy |
+| `04-bug-in-parser` | quote-aware parsing; the bug is in the ordering of operations | medium |
 | `05-add-input-validation` | implement validation from a spec, collecting all errors | medium |
 | `06-make-tests-pass` | two independent defects across three files | hard |
+| `07-multi-file-bug` | expiry semantics inconsistent across two modules | medium |
+| `08-constraint-refactor` | dedupe a type guard with behaviour pinned | medium |
+| `09-long-context` | implement a five-rule policy from a written spec | medium |
+| `10-error-recovery` | retry loop retries a permanent failure | medium |
+| `11-underspecified` | retry policy from a *partial* spec | medium |
+| `12-dependency-trace` | a change at the bottom of a four-module chain | medium |
+
+`11-underspecified` is the interesting one: its tests pin what is fixed and
+assert only that the backoff curve is non-negative, non-decreasing, capped,
+deterministic and monotonic in the base. An agent that picks a different
+reasonable curve still passes; one that crashes or contradicts itself does not.
+That is how to test an under-specified requirement without pretending it was
+specified.
+
+Difficulty labels are calibrated, not guessed:
+
+```bash
+python -m harnessprobe calibrate tasks
+```
+
+grades every reference solution and compares its declared label against what
+the solution's shape implies. It corrected three labels that were wrong — and
+it is also the check that catches a task whose tests reject the intended
+answer, which no amount of model runs would surface.
 
 They are deliberately small. A task that takes an hour to run is a task nobody
 runs five times, and five trials is the minimum for a usable interval.
@@ -281,25 +305,67 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the two rules a task must satisfy.
 ## Reading a report
 
 ```
-bash
-├── manifest.json    # provider, model, trials, task ids, version — enough to reproduce
+text
+.harnessprobe/runs/<run-id>/
+├── manifest.json    # provider, model, trials, task ids, version, fingerprint
 ├── results.json     # every TrialResult, full step trace
 ├── traces.jsonl     # one line per trial, streamed as it runs
 └── report.md        # the human-facing report
 ```
+
 `harnessprobe inspect <run-id> --failed-only` prints the step-by-step trace of
 failed trials — usually the fastest way to see *why* a harness hurt.
+
+### Comparing models
+
+```bash
+python -m harnessprobe compare runs/model-a runs/model-b
+```
+
+Only valid when both runs cover the same tasks; `compare` says so when they do
+not. It reads `traces.jsonl` when `results.json` is missing, so a run cut short
+by a provider outage is still analysable.
+
+### Interrupted runs
+
+```bash
+python -m harnessprobe run tasks --matrix configs/matrix-core.json \
+  --provider anthropic --model claude-opus-5-5 --trials 5 \
+  --out .harnessprobe/runs --run-id my-run --resume
+```
+
+`--resume` skips trials already recorded, after verifying the experiment
+fingerprint — task set, harness knobs, baseline, trial count. Change the matrix
+underneath a run and it refuses rather than absorbing cached trials from a
+different experiment:
+
+```text
+error: this run was recorded with a different experiment
+       (fingerprint 4e0fc3e465778dce, now d711038ceccead8c).
+```
 
 ---
 
 ## Honest limitations
 
-- **Six tasks is small.** One unlucky task moves the mean. The report says so.
+- **Twelve tasks is still small.** One unlucky task moves the mean. The report
+  says so, and refuses to present an incomplete matrix as a complete one.
+- **The published result covers 2 of 12 tasks.** The provider went down mid-run
+  and the remaining trials were never re-run. Treat
+  [`results/`](results/deepseek-v4.1-flash/) as a worked example of the report
+  format, not as a finding about that model.
 - **Intervals are wide at low trial counts.** At 3 trials a cell, differences
   under ~30 points are not separable. Use 5+ for anything you intend to publish.
 - **One model per run.** Cross-model comparison is a separate run and a separate
   report; HarnessProbe does not average across models, because that would hide
   exactly the interaction this tool exists to measure.
+- **HSI is a measurement, not a model property.** It depends on the task set,
+  the harness matrix and the trial budget. Two models are comparable only when
+  all three match — see
+  [docs/metrics.md](docs/metrics.md#what-hsi-is-and-is-not).
+- **The sandbox is not a container.** It confines the environment and the file
+  tools; a command still runs with your privileges. Untrusted task sets need a
+  real container — [docs/security.md](docs/security.md).
 - **The grader is the ceiling.** If a test suite is weak, a passing agent may
   still be wrong. Tasks are only as good as their tests.
 - **Token counts come from the provider.** A provider that omits usage on
@@ -307,11 +373,17 @@ failed trials — usually the fastest way to see *why* a harness hurt.
 
 ## Roadmap
 
-- [ ] Concurrency — trials are independent and currently run sequentially
-- [ ] `--resume` for interrupted runs
-- [ ] Cross-model comparison report (per-model HSI, side by side)
-- [ ] Bootstrap intervals alongside Wilson for small-n cells
-- [ ] A larger task set, including multi-file and test-writing tasks
+- [x] Concurrency (`--concurrency`, thread pool over independent trials)
+- [x] `--resume` for interrupted runs, with experiment-fingerprint validation
+- [x] Cross-model comparison (`compare`), reading interrupted runs
+- [x] Task-level bootstrap intervals alongside Wilson
+- [x] Twelve tasks with calibrated difficulty labels
+- [ ] Model-level difficulty calibration sweep (baseline harness, N trials,
+      per-task pass rate) — needs a live provider
+- [ ] A larger task set, including test-writing tasks
+- [ ] Sensitivity-profile diagnosis: name the knob behind a degradation and
+      suggest the dose-response experiment that would confirm it
+- [ ] HTML report rendering
 - [ ] Adapters for more provider wire formats
 
 ## License
