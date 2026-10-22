@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -386,6 +387,11 @@ def _safe(label: str) -> str:
     return "".join(c if c.isalnum() or c in "-_." else "_" for c in label)
 
 
+def _warn(message: str) -> None:
+    """Emit a setup warning once, on stderr, without failing the run."""
+    print(f"harnessprobe: warning: {message}", file=sys.stderr)
+
+
 def _stage_tests(task: Task, sandbox_root: Path) -> None:
     """Copy the task's tests into the sandbox, read-only.
 
@@ -400,6 +406,15 @@ def _stage_tests(task: Task, sandbox_root: Path) -> None:
         return
     dest = sandbox_root / "tests"
     if dest.exists():
+        # The workspace already ships a tests/ directory. Grading still reads the
+        # pristine copy from the task directory, so the score is unaffected — but
+        # the agent now sees a test tree it can edit, which is not the condition
+        # the other tasks run under. Say so rather than letting it pass silently.
+        _warn(
+            f"task {task.id!r} ships its own tests/ directory; the task's "
+            "tests were NOT staged read-only. Grading is unaffected, but the "
+            "agent can edit what it sees."
+        )
         return
     try:
         shutil.copytree(tests_src, dest)
