@@ -5,15 +5,17 @@ import pytest
 from harnessprobe.analysis import (
     aggregate,
     analyze,
+    diagnose,
     pass_at_k,
     pass_pow_k,
+    render_diagnosis,
     render_markdown,
     wilson_interval,
 )
 from harnessprobe.spec import TrialResult
 
 
-def trial(task, harness, passed, tokens=100, trial=0):
+def trial(task, harness, passed, tokens=100, trial=0, stop=None):
     return TrialResult(
         task_id=task,
         harness=harness,
@@ -22,7 +24,7 @@ def trial(task, harness, passed, tokens=100, trial=0):
         passed=passed,
         input_tokens=tokens,
         output_tokens=0,
-        stop_reason="submitted" if passed else "max_steps",
+        stop_reason=stop or ("submitted" if passed else "max_steps"),
     )
 
 
@@ -259,3 +261,129 @@ def test_token_delta_is_relative_to_baseline():
     report = analyze(results, model="m", baseline="base")
     rows = {r.harness: r for r in report.rows}
     assert rows["costly"].token_delta_pct == pytest.approx(100.0)
+
+
+# -- diagnosis -------------------------------------------------------------
+
+
+def _knobs():
+    import json
+    from pathlib import Path
+
+    raw = json.loads(Path("configs/matrix-core.json").read_text(encoding="utf-8"))
+    out = {raw["baseline"]["name"]: raw["baseline"]}
+    for h in raw["harnesses"]:
+        merged = dict(raw["baseline"])
+        merged.update(h)
+        out[h["name"]] = merged
+    return out
+
+
+def test_diagnosis_returns_one_entry_per_degraded_harness():
+    results = [
+        trial("t1", "base", True),
+        trial("t1", "no-shell", False),
+        trial("t2", "base", True),
+        trial("t2", "no-shell", False),
+    ]
+    report = analyze(results, model="m", baseline="base")
+    entries = diagnose(report)
+    assert [e["harness"] for e in entries] == ["no-shell"]
+
+
+def test_diagnosis_ignores_harnesses_that_improved():
+    results = [
+        trial("t1", "base", False),
+        trial("t1", "better", True),
+        trial("t2", "base", False),
+        trial("t2", "better", True),
+        trial("t1", "also", True),
+        trial("t2", "also", False),
+    ]
+    report = analyze(results, model="m", baseline="base")
+    entries = diagnose(report)
+    assert "better" not in [e["harness"] for e in entries]
+
+
+def test_diagnosis_names_the_knob_for_a_known_harness():
+    results = [
+        trial("t1", "base", True),
+        trial("t1", "no-shell", False),
+        trial("t2", "base", True),
+        trial("t2", "no-shell", False),
+    ]
+    report = analyze(results, model="m", baseline="base")
+    entry = diagnose(report)[0]
+    assert entry["knob"] is not None
+    assert entry["hypothesis"]
+    assert entry["experiment"]
+
+
+def test_diagnosis_admits_when_no_signature_matches():
+    results = [
+        trial("t1", "base", True),
+        trial("t1", "mystery-config", False),
+        trial("t2", "base", True),
+        trial("t2", "mystery-config", False),
+    ]
+    report = analyze(results, model="m", baseline="base")
+    entry = diagnose(report)[0]
+    assert entry["knob"] is None
+    assert entry["hypothesis"] is None
+
+
+def test_diagnosis_uses_stop_reason_evidence_when_available():
+    """A max_steps signature should be supported by trials ending in max_steps."""
+    results = [
+        trial("t1", "base", True),
+        trial("t1", "tight-budget", False, stop="max_steps"),
+        trial("t2", "base", True),
+        trial("t2", "tight-budget", False, stop="max_steps"),
+    ]
+    report = analyze(results, model="m", baseline="base", harness_knobs=_knobs())
+    entry = diagnose(report)[0]
+    assert entry["knob"] == "max_steps"
+    assert any("max_steps occurred" in e for e in entry["evidence"])
+
+
+def test_diagnosis_flags_contradicting_stop_reason_evidence():
+    """If the signature predicts max_steps but trials submitted, say so."""
+    results = [
+        trial("t1", "base", True),
+        trial("t1", "tight-budget", False, stop="submitted"),
+        trial("t2", "base", True),
+        trial("t2", "tight-budget", False, stop="submitted"),
+    ]
+    report = analyze(results, model="m", baseline="base", harness_knobs=_knobs())
+    entry = diagnose(report)[0]
+    assert any("does not support" in e for e in entry["evidence"])
+
+
+def test_diagnosis_is_empty_when_nothing_degraded():
+    results = [
+        trial("t1", "base", True),
+        trial("t1", "alt", True),
+        trial("t2", "base", True),
+        trial("t2", "alt", True),
+    ]
+    report = analyze(results, model="m", baseline="base")
+    assert diagnose(report) == []
+
+
+def test_render_diagnosis_is_empty_when_nothing_degraded():
+    results = [trial("t1", "base", True), trial("t1", "alt", True)]
+    report = analyze(results, model="m", baseline="base")
+    assert render_diagnosis(report) == ""
+
+
+def test_render_diagnosis_labels_itself_as_hypothetical():
+    results = [
+        trial("t1", "base", True),
+        trial("t1", "no-shell", False),
+        trial("t2", "base", True),
+        trial("t2", "no-shell", False),
+    ]
+    report = analyze(results, model="m", baseline="base")
+    text = render_diagnosis(report)
+    assert "hypotheses, not conclusions" in text
+    assert "Hypothesis" in text

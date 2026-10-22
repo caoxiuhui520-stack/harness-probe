@@ -145,6 +145,10 @@ class HarnessRow:
     # "measured stable" rather than "not measured".
     flakiness: float | None
     per_task: dict[str, float] = field(default_factory=dict)
+    # How trials ended, e.g. {"submitted": 3, "max_steps": 1}. The shape of
+    # the failures is what separates "ran out of budget" from "could not do
+    # it", which a pass rate cannot distinguish.
+    stop_reasons: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -350,6 +354,14 @@ def analyze(
                 else 0.0,
                 mean_steps=sum(c.steps for c in hcells) / n if n else 0.0,
                 flakiness=flakiness,
+                stop_reasons=dict(
+                    sorted(
+                        {
+                            reason: sum(c.stop_reasons.get(reason, 0) for c in hcells)
+                            for reason in {r for c in hcells for r in c.stop_reasons}
+                        }.items()
+                    )
+                ),
                 per_task={c.task_id: c.pass_rate for c in hcells},
             )
         )
@@ -424,6 +436,206 @@ def analyze(
 # --------------------------------------------------------------------------
 # Rendering
 # --------------------------------------------------------------------------
+
+
+# --------------------------------------------------------------------------
+# Diagnosis
+# --------------------------------------------------------------------------
+
+# Each entry maps a knob to what its signature looks like in the data. The
+# signature is a *hypothesis*, deliberately: a drop under `tight-budget` whose
+# trials end in max_steps is evidence for a budget hypothesis, not proof of
+# one — the same pattern appears when a task is near the model's limit and any
+# perturbation tips it.
+_KNOB_SIGNATURES: list[dict[str, Any]] = [
+    {
+        "knob": "max_steps",
+        "harnesses": ("tight-budget", "loose-budget"),
+        "stop_reason": "max_steps",
+        "hypothesis": "the step budget is binding — trials run out of room "
+        "before they finish",
+        "experiment": "fix every other knob and sweep max_steps across "
+        "several values; a dose-response curve (more steps, monotonically more "
+        "passes) supports the hypothesis, a flat one refutes it",
+    },
+    {
+        "knob": "tool_set (shell access)",
+        "harnesses": ("no-shell",),
+        "stop_reason": None,
+        "hypothesis": "the agent cannot verify its own work, so it cannot "
+        "detect or recover from its own mistakes",
+        "experiment": "compare no-shell against a harness that keeps the shell "
+        "but hides its output; if the drop persists, the loss is verification, "
+        "not execution",
+    },
+    {
+        "knob": "tool_set (search)",
+        "harnesses": ("no-search",),
+        "stop_reason": None,
+        "hypothesis": "the agent must read files to locate code, so it spends "
+        "its budget on navigation instead of the fix",
+        "experiment": "compare no-search against full tools on tasks whose "
+        "code is spread over many files; if the gap grows with file count, the "
+        "cost is navigation",
+    },
+    {
+        "knob": "tool_description_style",
+        "harnesses": ("minimal-tools", "terse-tools"),
+        "stop_reason": None,
+        "hypothesis": "the agent misuses the tools because it cannot see how "
+        "they behave",
+        "experiment": "inspect the failed traces for malformed tool calls or "
+        "wrong argument shapes; if the failure mode is tool misuse rather than "
+        "a wrong answer, the hypothesis holds",
+    },
+    {
+        "knob": "history_policy",
+        "harnesses": ("drop-old-output",),
+        "stop_reason": None,
+        "hypothesis": "the agent loses information it gathered earlier and "
+        "re-derives or contradicts it",
+        "experiment": "compare against keep_last_n with a matched window size; "
+        "if both degrade similarly, the loss is context volume rather than "
+        "which content was dropped",
+    },
+    {
+        "knob": "reasoning_hint",
+        "harnesses": ("no-reasoning-hint",),
+        "stop_reason": None,
+        "hypothesis": "the agent acts before it has understood the task",
+        "experiment": "compare step counts and first-action correctness; if "
+        "the no-hint run takes more steps to reach the same fix, the hint was "
+        "buying planning, not verbosity",
+    },
+    {
+        "knob": "retry_on_error",
+        "harnesses": ("no-retry-nudge",),
+        "stop_reason": "no_tool_call",
+        "hypothesis": "the agent stops calling tools and the session ends "
+        "before the work is done",
+        "experiment": "count trials ending in no_tool_call under both "
+        "harnesses; if the drop is entirely explained by those, the knob is "
+        "recovering stalls rather than improving capability",
+    },
+    {
+        "knob": "system_prompt",
+        "harnesses": ("verbose-system",),
+        "stop_reason": None,
+        "hypothesis": "the system prompt changed what the agent prioritises",
+        "experiment": "ablate the prompt's clauses one at a time; a single "
+        "clause carrying the whole effect is a different finding from the "
+        "prompt as a whole",
+    },
+]
+
+
+def diagnose(report: Report) -> list[dict[str, Any]]:
+    """Attach a hypothesis and a confirming experiment to each degradation.
+
+    Returns one entry per harness whose delta is negative, largest drop first.
+    Every entry is explicitly a hypothesis: the data shows *that* a
+    configuration is associated with a drop, not *why*. The experiment field
+    is what would settle it.
+
+    A harness with no matching signature still gets an entry — "no hypothesis"
+    is an honest result and better than inventing a mechanism.
+    """
+    out: list[dict[str, Any]] = []
+    rows = {r.harness: r for r in report.rows}
+    baseline_row = rows.get(report.baseline)
+
+    for row in sorted(report.rows, key=lambda r: r.delta):
+        if row.harness == report.baseline or row.delta >= 0:
+            continue
+
+        signature = next(
+            (s for s in _KNOB_SIGNATURES if row.harness in s["harnesses"]), None
+        )
+        entry: dict[str, Any] = {
+            "harness": row.harness,
+            "delta": row.delta,
+            "stop_reasons": row.stop_reasons,
+            "knob": signature["knob"] if signature else None,
+            "hypothesis": signature["hypothesis"] if signature else None,
+            "experiment": signature["experiment"] if signature else None,
+            "evidence": [],
+        }
+
+        # Does the stop-reason distribution support the signature?
+        if signature and signature.get("stop_reason"):
+            reason = signature["stop_reason"]
+            here = row.stop_reasons.get(reason, 0)
+            there = baseline_row.stop_reasons.get(reason, 0) if baseline_row else 0
+            if here > there:
+                entry["evidence"].append(
+                    f"{reason} occurred {here}x here vs {there}x at baseline"
+                )
+            else:
+                entry["evidence"].append(
+                    f"expected more {reason} endings, saw {here} vs {there} at "
+                    "baseline — the stop-reason evidence does not support this "
+                    "hypothesis"
+                )
+
+        if signature:
+            changed = report.knobs.get(row.harness, {})
+            diff = {
+                k: v
+                for k, v in changed.items()
+                if baseline_row is None
+                or v != report.knobs.get(report.baseline, {}).get(k)
+            }
+            if diff:
+                entry["evidence"].append(
+                    "knob actually changed: "
+                    + ", ".join(f"{k}={v!r}" for k, v in sorted(diff.items()))
+                )
+
+        if not entry["evidence"]:
+            entry["evidence"].append(
+                "no supporting or contradicting evidence beyond the delta itself"
+            )
+        out.append(entry)
+    return out
+
+
+def render_diagnosis(report: Report) -> str:
+    """Render the diagnosis section, hypotheses labelled as hypotheses."""
+    entries = diagnose(report)
+    if not entries:
+        return ""
+
+    lines = [
+        "## Diagnosis (hypotheses, not conclusions)",
+        "",
+        (
+            "Each entry names the knob most likely responsible and the "
+            "experiment that would confirm it. A drop is evidence that a "
+            "configuration is associated with a failure, not evidence of why "
+            "— at least three mechanisms produce the same delta."
+        ),
+        "",
+    ]
+    for entry in entries:
+        lines.append(f"### `{entry['harness']}`  ({entry['delta']:+.1%})")
+        lines.append("")
+        if entry["knob"]:
+            lines.append(f"- **Knob:** `{entry['knob']}`")
+            lines.append(f"- **Hypothesis:** {entry['hypothesis']}")
+            lines.append(f"- **To confirm:** {entry['experiment']}")
+        else:
+            lines.append(
+                "- **Knob:** no signature matched this harness. That is an "
+                "honest result — read the failed traces before inventing a "
+                "mechanism."
+            )
+        reasons = ", ".join(f"{k}x {v}" for k, v in entry["stop_reasons"].items())
+        if reasons:
+            lines.append(f"- **How trials ended:** {reasons}")
+        lines.append("- **Evidence:**")
+        lines.extend(f"  - {e}" for e in entry["evidence"])
+        lines.append("")
+    return "\n".join(lines)
 
 
 def render_markdown(report: Report) -> str:

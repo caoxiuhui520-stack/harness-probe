@@ -13,7 +13,12 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
-from .analysis import analyze, render_markdown, render_per_task
+from .analysis import (
+    analyze,
+    render_diagnosis,
+    render_markdown,
+    render_per_task,
+)
 from .graders import grade
 from .providers import build_provider
 from .runner import MatrixJob, run_matrix, summarize_trace
@@ -271,7 +276,13 @@ def cmd_run(args: argparse.Namespace) -> int:
     (run_dir / "report.json").write_text(
         json.dumps(report.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    md = render_markdown(report) + "\n" + render_per_task(report)
+    md = (
+        render_markdown(report)
+        + "\n"
+        + render_per_task(report)
+        + "\n"
+        + render_diagnosis(report)
+    )
     (run_dir / "report.md").write_text(md, encoding="utf-8")
 
     print()
