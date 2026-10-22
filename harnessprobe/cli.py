@@ -348,37 +348,58 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_grade(args: argparse.Namespace) -> int:
-    """Re-grade an existing run without re-spending tokens."""
+def cmd_analyze(args: argparse.Namespace) -> int:
+    """Re-analyze a saved run without re-running any trial.
+
+    This re-computes the statistics and re-renders the report. It does NOT
+    re-grade: grading runs the task's test suite against the trial's sandbox,
+    and the sandbox is deleted unless `--keep-sandboxes` was passed. The name
+    says `analyze` rather than `grade` for that reason — a command called
+    "re-grade" that only recomputes percentages invites the reader to think the
+    pass/fail labels were re-derived.
+    """
     run_dir = Path(args.run)
-    results_path = run_dir / "results.json"
-    manifest_path = run_dir / "manifest.json"
-    if not results_path.exists() or not manifest_path.exists():
-        print(f"error: {run_dir} is not a run directory", file=sys.stderr)
+    try:
+        results, manifest = _load_run(run_dir)
+    except (SpecError, json.JSONDecodeError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    tasks = {t.id: t for t in load_tasks(args.tasks or ["tasks"])}
-    results = [
-        TrialResult.from_dict(dict(r))
-        for r in json.loads(results_path.read_text(encoding="utf-8"))
-    ]
-
-    print(
-        "re-grading needs the trial sandboxes; pass --keep-sandboxes when running",
-        file=sys.stderr,
-    )
-    missing = [r.task_id for r in results if r.task_id not in tasks]
-    if missing:
-        print(f"error: tasks not found for {sorted(set(missing))}", file=sys.stderr)
-        return 2
+    if args.tasks:
+        try:
+            known = {t.id for t in load_tasks(args.tasks)}
+        except SpecError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        unknown = sorted({r.task_id for r in results} - known)
+        if unknown:
+            print(f"error: results reference unknown tasks: {unknown}", file=sys.stderr)
+            return 2
 
     report = analyze(
         results,
         model=manifest.get("model", ""),
         baseline=manifest.get("baseline", "baseline"),
     )
-    print(render_markdown(report))
+    md = (
+        render_markdown(report)
+        + "\n"
+        + render_per_task(report)
+        + "\n"
+        + render_diagnosis(report)
+    )
+    if args.out:
+        # Rewrite the report in place, so a re-analysis is not lost when the
+        # terminal scrolls. Only report.md is touched; results and traces are
+        # the raw record and must not be rewritten from a re-analysis.
+        (run_dir / "report.md").write_text(md, encoding="utf-8")
+        (run_dir / "report.json").write_text(
+            json.dumps(report.to_dict(), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        print(f"rewrote {run_dir / 'report.md'}")
+    print()
+    print(md)
     return 0
 
 
@@ -389,8 +410,17 @@ def cmd_inspect(args: argparse.Namespace) -> int:
         print(f"error: no traces.jsonl in {run_dir}", file=sys.stderr)
         return 2
     shown = 0
+    skipped = 0
     for line in traces.read_text(encoding="utf-8").splitlines():
-        r = TrialResult.from_dict(json.loads(line))
+        if not line.strip():
+            continue
+        try:
+            r = TrialResult.from_dict(json.loads(line))
+        except (json.JSONDecodeError, TypeError):
+            # A truncated line is what an interrupted run leaves behind; skip
+            # it rather than losing every trace after it.
+            skipped += 1
+            continue
         if args.task and r.task_id != args.task:
             continue
         if args.harness and r.harness != args.harness:
@@ -402,6 +432,14 @@ def cmd_inspect(args: argparse.Namespace) -> int:
         shown += 1
         if args.limit and shown >= args.limit:
             break
+    if skipped:
+        print(
+            f"note: skipped {skipped} unreadable trace line(s) — the run was "
+            "probably interrupted mid-write",
+            file=sys.stderr,
+        )
+    if shown == 0 and skipped == 0:
+        print("no matching traces", file=sys.stderr)
     return 0
 
 
@@ -704,10 +742,18 @@ def build_parser() -> argparse.ArgumentParser:
     inspect.add_argument("--limit", type=int, default=5)
     inspect.set_defaults(func=cmd_inspect)
 
-    redo = sub.add_parser("grade", help="re-analyze a saved run")
+    redo = sub.add_parser(
+        "analyze",
+        help="re-run the statistics on a saved run (does not re-grade)",
+    )
     redo.add_argument("run")
     redo.add_argument("tasks", nargs="*")
-    redo.set_defaults(func=cmd_grade)
+    redo.add_argument(
+        "--out",
+        action="store_true",
+        help="rewrite report.md and report.json in the run directory",
+    )
+    redo.set_defaults(func=cmd_analyze)
 
     cmp_ = sub.add_parser("compare", help="compare several runs side by side")
     cmp_.add_argument("runs", nargs="+", help="run directories")
