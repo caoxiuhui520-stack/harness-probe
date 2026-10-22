@@ -429,6 +429,13 @@ def cmd_check_solutions(args: argparse.Namespace) -> int:
     return check_solutions(target)
 
 
+def cmd_calibrate(args: argparse.Namespace) -> int:
+    from .purity import calibrate
+
+    target = args.tasks[0] if args.tasks else "tasks"
+    return calibrate(target)
+
+
 def cmd_validate(args: argparse.Namespace) -> int:
     ok = True
     try:
@@ -582,6 +589,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     solutions.add_argument("tasks", nargs="*", help="tasks directory (default: tasks)")
     solutions.set_defaults(func=cmd_check_solutions)
+
+    calib = sub.add_parser(
+        "calibrate",
+        help="grade each reference solution and check the declared difficulty",
+    )
+    calib.add_argument("tasks", nargs="*", help="tasks directory (default: tasks)")
+    calib.set_defaults(func=cmd_calibrate)
 
     init = sub.add_parser("init", help="scaffold a new task")
     init.add_argument("path")

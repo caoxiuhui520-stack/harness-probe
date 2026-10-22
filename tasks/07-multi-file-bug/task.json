@@ -1,9 +1,17 @@
 {
   "id": "07-multi-file-bug",
   "title": "Cache expiry is inconsistent across two modules",
-  "prompt": "The cache in this project misbehaves: `size()` and `keys()` report entries that have already expired, and `session.reload()` re-fetches keys that should have been dropped. The intended behaviour is specified in docs/design.md — read it first. The defect spans cache.py and session.py. Run the tests to reproduce, then fix it so the specification holds. Do not change public signatures and do not modify the tests.",
+  "prompt": "The cache in this project misbehaves: `size()` and `keys()` report entries that have already expired, and `session.reload()` re-fetches keys that should have been dropped. The intended behaviour is specified in docs/design.md \u2014 read it first. The defect spans cache.py and session.py. Run the tests to reproduce, then fix it so the specification holds. Do not change public signatures and do not modify the tests.",
   "max_steps": 22,
-  "grader": {"type": "pytest", "target": "tests", "timeout": 120},
-  "tags": ["debugging", "multi-file", "python"],
-  "difficulty": "hard"
+  "grader": {
+    "type": "pytest",
+    "target": "tests",
+    "timeout": 120
+  },
+  "tags": [
+    "debugging",
+    "multi-file",
+    "python"
+  ],
+  "difficulty": "medium"
 }

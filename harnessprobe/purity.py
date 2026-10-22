@@ -21,6 +21,10 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover - typing only, avoids a circular import
+    from harnessprobe.spec import Task
 
 # Substrings that appear only in a *solved* workspace. Each entry names the task
 # it guards so a failure message can say which solution leaked.
@@ -829,3 +833,103 @@ def check_solutions(root: Path) -> int:
             print(f"FAIL {task_id}: reference solution does not pass")
             print((proc.stdout or "")[-1500:])
     return 0 if ok else 1
+
+
+def calibrate(root: Path) -> int:
+    """Grade each reference solution and report what the task actually costs.
+
+    A declared `difficulty: medium` is a guess. The reference solution is a
+    measurement: it is a correct solution written by someone who already knew
+    the answer, so the effort it represents is a lower bound on what the task
+    demands. Grading it also confirms the grader accepts the intended answer,
+    which is the check that catches a task whose tests are simply wrong.
+
+    This grades the solution directly rather than driving an agent through it,
+    because there is no agent to drive — the point is the task's cost, not a
+    model's. A model-level calibration sweep (baseline harness, N trials, per
+    task) is a separate command that needs a real provider.
+    """
+    import shutil
+    import tempfile
+
+    from harnessprobe.graders import grade
+    from harnessprobe.spec import Task
+
+    root = Path(root)
+    rows: list[tuple[Task, dict[str, str]]] = []
+    for task_dir in sorted(root.iterdir()):
+        if not task_dir.is_dir() or not (task_dir / "task.json").exists():
+            continue
+        files = _REFERENCE_SOLUTIONS.get(task_dir.name)
+        if not files:
+            print(f"SKIP {task_dir.name}: no reference solution")
+            continue
+        rows.append((Task.load(task_dir), files))
+
+    if not rows:
+        print("no tasks with reference solutions found")
+        return 1
+
+    print(f"{'task':<26} {'files':>6} {'grade':>7}  {'declared':<8} inferred")
+    print("-" * 62)
+
+    ok = True
+    for task, files in rows:
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp)
+            shutil.copytree(task.workspace_path, ws, dirs_exist_ok=True)
+            for rel, text in files.items():
+                dest = ws / rel
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_text(text, encoding="utf-8")
+            outcome = grade(task, _reference_result(task), ws)
+
+        inferred = _infer_difficulty(task, files)
+        match = (
+            "" if inferred == task.difficulty else f"  <- declared {task.difficulty}"
+        )
+        if not outcome.passed:
+            match += "  (GRADER REJECTED THE REFERENCE SOLUTION)"
+            ok = False
+        print(
+            f"{task.id:<26} {len(files):>6} "
+            f"{'pass' if outcome.passed else 'FAIL':>7}  "
+            f"{task.difficulty:<8} {inferred}{match}"
+        )
+
+    print(
+        "\n`inferred` comes from the reference solution's own shape — how many "
+        "files it\ntouches and how much it rewrites — not from a model run. It "
+        "is a lower bound on\nthe task's cost, so a task whose inferred "
+        "difficulty is below its declared one\nis easier than its label claims."
+    )
+    return 0 if ok else 1
+
+
+def _reference_result(task: Task):
+    """A minimal TrialResult so grade() can run against a finished workspace."""
+    from harnessprobe.spec import Step, TrialResult
+
+    return TrialResult(
+        task_id=task.id,
+        harness="reference",
+        model="reference",
+        trial=0,
+        passed=True,
+        steps=[Step(index=0, kind="assistant", text="reference solution")],
+    )
+
+
+def _infer_difficulty(task: Task, files: dict[str, str]) -> str:
+    """Bucket a task by how much of its workspace the reference solution rewrites.
+
+    Deliberately crude and deterministic: file count plus bytes changed. It is
+    a sanity check on the declared label, not a replacement for a model-level
+    calibration sweep.
+    """
+    total_bytes = sum(len(t.encode("utf-8")) for t in files.values())
+    if len(files) >= 3 or total_bytes > 2500:
+        return "hard"
+    if len(files) >= 2 or total_bytes > 900:
+        return "medium"
+    return "easy"
