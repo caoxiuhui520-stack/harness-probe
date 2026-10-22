@@ -443,8 +443,11 @@ def _stage_tests(task: Task, sandbox_root: Path) -> None:
         shutil.copytree(tests_src, dest)
     except OSError:
         return
-    # Make the staged copy read-only so a write attempt fails loudly instead of
-    # appearing to succeed.
+    # Make the staged copy read-only. This is a speed bump, not a boundary: the
+    # agent has a shell and can chmod it back, so a determined agent can edit
+    # what it sees. Grading is unaffected either way — it reads the pristine
+    # copy from the task directory — but an agent that does this is verifying
+    # against tests it modified, which is worth knowing when reading its trace.
     for path in dest.rglob("*"):
         if path.is_file():
             try:
